@@ -66,6 +66,10 @@ main{padding-top:14px}
 /* משימה */
 .task{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:#fff}
 .task:last-child{border-bottom:0}
+.task.future{background:#fafaff}
+.task.future .t-title{color:#64748b}
+.tgl{border:1px solid #cbd5e1;border-radius:99px;padding:5px 12px;font-size:13.5px;background:#fff;color:#475569;font-weight:600}
+.tgl.on{background:var(--pri);border-color:var(--pri);color:#fff}
 .task.done .t-title{text-decoration:line-through;color:var(--mute)}
 .chk{width:24px;height:24px;border-radius:7px;border:2px solid #cbd5e1;flex:none;margin-top:1px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;background:#fff}
 .chk:hover{border-color:var(--ok)}
@@ -214,7 +218,7 @@ const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbyLvAJdKErmUG-T
 
 const LS = {
   gas: 'mt_gas', code: 'mt_code', data: 'mt_data', queue: 'mt_queue', author: 'mt_author',
-  tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone'
+  tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone', showFuture: 'mt_showfuture'
 };
 const NEEDED_SERVER_VERSION = 2;
 const SHEET_KEYS = { Categories:'id', Tasks:'id', Log:'id', RabbiNotes:'id', WorkHours:'id', DaysOff:'date', Priorities:'taskId' };
@@ -236,6 +240,7 @@ let tab = isEditor ? 'pri' : 'rabbi';
 let workDate = todayISO();
 let collapsed = lsJSON(LS.collapsed, {});
 let showDone = lsGet(LS.showDone, '0') === '1';
+let showFuture = lsGet(LS.showFuture, '0') === '1';
 let syncState = 'idle';
 
 function emptyData(){ return { Categories:[], Tasks:[], Log:[], Priorities:[], RabbiNotes:[], WorkHours:[], DaysOff:[] }; }
@@ -629,13 +634,13 @@ function taskRow(t, ctx, idx){
   const meta = [];
   if (ctx === 'pri'){ const c = cat(t.categoryId); if (c && c.parentId) meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(c.name)}</span>`); }
   else if (ctx !== 'cat') meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(catPath(t.categoryId))}</span>`);
-  if (t.dueDate && !done){
+  if (t.dueDate && !done && !isFuture(t)){
     const dd = daysBetween(todayISO(), t.dueDate);
     meta.push(`<span class="chip ${dd < 0 ? 'late' : dd === 0 ? 'today' : ''}">📅 ${dd < 0 ? 'באיחור · ' : dd === 0 ? 'היום · ' : ''}${heDate(t.dueDate)} · ${hebDate(t.dueDate)}</span>`);
   }
   if (done && t.doneDate) meta.push(`<span class="chip okc">✓ ${heDate(t.doneDate)}</span>`);
   if (t.recurrence && t.recurrence !== 'none') meta.push(`<span class="chip rec">↻ ${REC_LABEL[t.recurrence] || t.recurrence}${truthy(t.fixedSchedule) ? ' · 📌' : ''}</span>`);
-  if (isFuture(t)) meta.push(`<span class="chip">⏳ יופיע ב-${heDate(t.dueDate)}</span>`);
+  if (isFuture(t)) meta.push(`<span class="chip">⏳ יופיע ב-${heDate(t.dueDate)} · ${hebDate(t.dueDate)}</span>`);
   if (truthy(t.continuous)) meta.push(`<span class="chip cont">🔁 מתמשכת</span>`);
   if (t.rabbiType){
     const st = t.rabbiStatus;
@@ -651,7 +656,7 @@ function taskRow(t, ctx, idx){
   if (prog && !done) meta.push(`<span class="chip">◐ ${prog} תיעודים</span>`);
   const lastRabbi = notesOf(t.id).filter(n => n.text && (n.action === 'comment' || n.action === 'approve')).pop();
   const pri = inPri(t.id);
-  return `<div class="task ${done ? 'done' : ''}" data-id="${esc(t.id)}">
+  return `<div class="task ${done ? 'done' : ''} ${isFuture(t) ? 'future' : ''}" data-id="${esc(t.id)}">
     ${ctx === 'pri' && isEditor ? `<span class="handle" title="גרור לשינוי סדר">⠿</span>` : ''}
     ${ctx === 'pri' ? `<span class="pnum">${idx+1}</span>` : ''}
     <button class="chk ${done ? 'on' : ''}" ${isEditor ? '' : 'disabled'} onclick="markDone('${esc(t.id)}')" title="${done ? 'בוצע — לחץ להחזרה' : 'סמן כבוצע'}">${done ? '✓' : ''}</button>
@@ -779,14 +784,17 @@ function addPicked(){
 
 /* ---------- קטגוריות ---------- */
 function viewCats(){
+  const futAll = S.Tasks.filter(isFuture).length;
   let h = `<div class="row" style="margin-bottom:12px">
-    <label class="row muted" style="gap:5px;cursor:pointer"><input type="checkbox" ${showDone ? 'checked' : ''} onchange="showDone=this.checked;lsSet(LS.showDone,showDone?'1':'0');render()"> הצג גם משימות שבוצעו ומשימות חוזרות שמועדן טרם הגיע</label>
+    <button class="tgl ${showFuture ? 'on' : ''}" onclick="showFuture=!showFuture;lsSet(LS.showFuture,showFuture?'1':'0');render()">⏳ מתוזמנות${futAll ? ' (' + futAll + ')' : ''}</button>
+    <button class="tgl ${showDone ? 'on' : ''}" onclick="showDone=!showDone;lsSet(LS.showDone,showDone?'1':'0');render()">✓ בוצעו</button>
     <span class="grow"></span>
     ${isEditor ? `<button class="btn sm sec" onclick="openCat(null)">＋ קטגוריה</button>` : ''}</div>`;
   const rs = roots();
   if (!rs.length) h += `<div class="card"><div class="empty">אין עדיין קטגוריות.${isEditor ? ' התחל ב"＋ קטגוריה".' : ''}</div></div>`;
-  const visible = t => (t.status === 'open' && !isFuture(t)) || (showDone && (t.status === 'done' || isFuture(t)));
-  const sortT = (a,b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1) || String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999')) || String(a.createdAt).localeCompare(String(b.createdAt));
+  const visible = t => (t.status === 'open' && !isFuture(t)) || (showDone && t.status === 'done') || (showFuture && isFuture(t));
+  const rank = t => t.status === 'done' ? 2 : isFuture(t) ? 1 : 0;
+  const sortT = (a,b) => rank(a) - rank(b) || String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999')) || String(a.createdAt).localeCompare(String(b.createdAt));
   rs.forEach(r => {
     const subs = childrenOf(r.id);
     const own = S.Tasks.filter(t => String(t.categoryId) === String(r.id) && visible(t)).sort(sortT);
@@ -797,7 +805,7 @@ function viewCats(){
     h += `<div class="card ${col ? 'collapsed' : ''}">
       <div class="card-h cat-h" onclick="toggleCol('${r.id}')">
         <span class="caret">▼</span><span class="cdot" style="background:${catColor(r.id)}"></span>
-        <h2>${esc(r.name)}${catRabbi(r.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(r.id)] + '</span>' : ''} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
+        <h2>${esc(r.name)}${catRabbi(r.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(r.id)] + '</span>' : ''} <span class="cnt">(${total})${fut && !showFuture ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
         ${isEditor ? `<button class="ib" title="משימה חדשה בקטגוריה" onclick="event.stopPropagation();openTask(null,{categoryId:'${r.id}'})">＋</button>
         <button class="ib" title="עריכת קטגוריה" onclick="event.stopPropagation();openCat('${r.id}')">✎</button>` : ''}
       </div><div class="cbody">
