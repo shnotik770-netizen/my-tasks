@@ -141,6 +141,11 @@ table.sum th{color:var(--mute);font-weight:600;font-size:13px}
 
 /* היסטוריה */
 .day{padding:10px 14px;border-bottom:1px solid var(--line)}
+.dayrow{cursor:pointer;margin-bottom:0!important}
+.hrs{font-weight:800;min-width:44px;text-align:left}
+.dd{margin:8px 0 2px;padding:8px 12px;background:var(--soft);border-radius:10px}
+.dd-s{font-size:12.5px;font-weight:700;color:var(--mute);margin:6px 0 2px}
+.dd-s:first-child{margin-top:0}
 .day-h{display:flex;gap:8px;align-items:center;font-weight:700;margin-bottom:4px;flex-wrap:wrap}
 .lg{font-size:14px;padding:2px 0;display:flex;gap:6px;align-items:flex-start}
 .lg .x{color:#cbd5e1;font-size:13px;margin-inline-start:auto}
@@ -190,8 +195,7 @@ table.sum th{color:var(--mute);font-weight:600;font-size:13px}
       <button data-tab="pri" onclick="go('pri')">⭐ עדיפויות</button>
       <button data-tab="cats" onclick="go('cats')">📂 קטגוריות</button>
       <button data-tab="rabbi" onclick="go('rabbi')">🕊️ הרב סגל<span id="rabbiBadge"></span></button>
-      <button data-tab="hours" onclick="go('hours')">⏱️ שעות</button>
-      <button data-tab="hist" onclick="go('hist')">📜 היסטוריה</button>
+      <button data-tab="hours" onclick="go('hours')">⏱️ שעות והיסטוריה</button>
     </nav>
   </div>
 </header>
@@ -220,7 +224,7 @@ const LS = {
   gas: 'mt_gas', code: 'mt_code', data: 'mt_data', queue: 'mt_queue', author: 'mt_author',
   tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone', showFuture: 'mt_showfuture'
 };
-const NEEDED_SERVER_VERSION = 3;
+const NEEDED_SERVER_VERSION = 4;
 const SHEET_KEYS = { Categories:'id', Tasks:'id', Log:'id', RabbiNotes:'id', WorkHours:'id', DaysOff:'date', Priorities:'taskId' };
 const REC_LABEL = { none:'ללא', daily:'יומית', weekly:'שבועית', monthly:'חודשית', bimonthly:'דו־חודשית', yearly:'שנתית' };
 const PALETTE = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#4b5563','#65a30d','#9333ea'];
@@ -355,6 +359,24 @@ function quickAdd(){
   S.Tasks.push(rec); const pl = priInsert(priList(), [id]); S.Tasks.pop();
   commit([ up('Tasks', rec), priOps(pl) ], '⭐ נוספה');
   setTimeout(() => { const i = document.getElementById('qAdd'); if (i) i.focus(); }, 30);
+}
+function copyPriWhatsApp(){
+  const list = priList(); if (!list.length){ toast('הרשימה ריקה'); return; }
+  let s = '*עדיפויות* — ' + heDate(todayISO()) + ' · ' + hebDate(todayISO()) + '\n';
+  let n = 0;
+  priBlocks(list).forEach(b => {
+    const c = cat(b.root); s += '\n*' + (c ? c.name : 'בלי קטגוריה') + '*\n';
+    list.slice(b.start, b.end + 1).forEach(p => { const t = task(p.taskId); n++;
+      const extra = [];
+      const sc = cat(t.categoryId); if (sc && sc.parentId) extra.push(sc.name);
+      if (t.dueDate) extra.push(shortDate(t.dueDate));
+      if (t.rabbiType && t.rabbiStatus === 'pending') extra.push('אצל הרב');
+      s += n + '. ' + t.title + (extra.length ? ' (' + extra.join(', ') + ')' : '') + (p.note ? ' — ' + p.note : '') + '\n';
+    });
+  });
+  const done = S.Log.filter(l => l.date === todayISO() && l.result === 'done');
+  if (done.length){ s += '\n*בוצע היום:*\n'; done.forEach(l => { const t = task(l.taskId); s += '✓ ' + (t ? t.title : '') + (l.note ? ' — ' + l.note : '') + '\n'; }); }
+  copyText(s);
 }
 function sortPriByCat(){
   const list = priList().map((p,i) => ({ p, i }));
@@ -580,23 +602,24 @@ function rabbiAct(id, act){
   const a = author() || askAuthor(); if (!a) return;
   const box = document.getElementById('rin_' + id);
   const text = box ? box.value.trim() : '';
-  if (act === 'comment' && !text){ toast('כתוב הערה קודם', true); return; }
+  if ((act === 'comment' || act === 'answer') && !text){ toast('כתוב הערה קודם', true); return; }
   const noteId = uid('n'), followupId = uid('t'), now = new Date().toISOString();
   const ops = [ up('RabbiNotes', { id:noteId, taskId:id, author:a, date:todayISO(), action:act, text }) ];
-  if (act !== 'comment') ops.push(up('Tasks', { id, rabbiStatus: act === 'approve' ? 'approved' : act === 'reject' ? 'rejected' : 'seen', updatedAt:now }));
+  if (act !== 'comment') ops.push(up('Tasks', { id, rabbiStatus: { approve:'approved', reject:'rejected', seen:'seen', answer:'answered' }[act], updatedAt:now }));
   if (act === 'reject') ops.push(up('Tasks', { id:followupId, title:'המשך: ' + t.title, categoryId:t.categoryId, dueDate:'', recurrence:'none', status:'open', continuous:false,
     parentTaskId:id, rabbiType:'', rabbiStatus:'', needsDecision:true, notes: text ? 'הרב סגל לא אישר: ' + text : 'הרב סגל לא אישר', createdAt:now, updatedAt:now, doneDate:'' }));
   applyOps(ops); saveCache(); render();
-  toast({ approve:'✅ אושר', reject:'❌ לא אושר — נוצרה משימת המשך', seen:'👁 סומן "ראיתי"', comment:'💬 ההערה נשמרה' }[act]);
+  toast({ approve:'✅ אושר', reject:'❌ לא אושר — נוצרה משימת המשך', seen:'👁 סומן "ראיתי"', comment:'💬 ההערה נשמרה', answer:'✔ הבירור נענה' }[act]);
   if (!isLocal()) enqueue({ action:'rabbiAction', taskId:id, act, text, author:a, date:todayISO(), noteId, followupId });
 }
 function copyRabbiWhatsApp(){
   const pend = rabbiPending();
   if (!pend.length){ toast('אין משימות ממתינות'); return; }
   let s = '*משימות הממתינות לרב סגל* (' + heDate(todayISO()) + ')\n';
-  const ap = pend.filter(t => t.rabbiType === 'approve'), inf = pend.filter(t => t.rabbiType === 'info');
-  if (ap.length){ s += '\n*לאישור:*\n'; ap.forEach((t,i) => s += (i+1) + '. ' + t.title + ' [' + catPath(t.categoryId) + ']' + (t.notes ? ' — ' + t.notes : '') + '\n'); }
-  if (inf.length){ s += '\n*לידיעה:*\n'; inf.forEach((t,i) => s += (i+1) + '. ' + t.title + ' [' + catPath(t.categoryId) + ']' + (t.notes ? ' — ' + t.notes : '') + '\n'); }
+  [['approve','לאישור'], ['ask','לבירור'], ['info','לידיעה']].forEach(([k, lab]) => {
+    const ts = pend.filter(t => t.rabbiType === k); if (!ts.length) return;
+    s += '\n*' + lab + ':*\n'; ts.forEach((t,i) => s += (i+1) + '. ' + t.title + ' [' + catPath(t.categoryId) + ']' + (t.notes ? ' — ' + t.notes : '') + '\n');
+  });
   copyText(s);
 }
 function copyText(s){
@@ -610,6 +633,7 @@ function copyText(s){
 function go(t){ tab = t; render(); window.scrollTo(0,0); }
 
 function render(){
+  if (tab === 'hist') tab = 'hours';
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   const pend = rabbiPending().length;
   document.getElementById('rabbiBadge').innerHTML = pend ? '<span class="badge">' + pend + '</span>' : '';
@@ -624,7 +648,7 @@ function render(){
   lb.textContent = isEditor ? '🔓 עריכה' : '🔒 כניסה';
   document.getElementById('fab').classList.toggle('hide', !isEditor || tab === 'rabbi' || tab === 'hist' || tab === 'hours');
   const v = document.getElementById('view');
-  const fn = { pri:viewPri, cats:viewCats, rabbi:viewRabbi, hours:viewHours, hist:viewHist }[tab] || viewPri;
+  const fn = { pri:viewPri, cats:viewCats, rabbi:viewRabbi, hours:viewHours, hist:viewHours }[tab] || viewPri;
   v.innerHTML = fn();
   if (tab === 'pri') initSortable();
 }
@@ -644,17 +668,18 @@ function taskRow(t, ctx, idx){
   if (truthy(t.continuous)) meta.push(`<span class="chip cont">🔁 מתמשכת</span>`);
   if (t.rabbiType){
     const st = t.rabbiStatus;
-    if (st === 'pending') meta.push(`<span class="chip rab">🕊️ ${t.rabbiType === 'approve' ? 'ממתין לאישור הרב' : 'לידיעת הרב'}</span>`);
+    if (st === 'pending') meta.push(`<span class="chip rab">🕊️ ${{ approve:'ממתין לאישור הרב', ask:'בירור מול הרב', info:'לידיעת הרב' }[t.rabbiType] || 'אצל הרב'}</span>`);
     else if (st === 'approved') meta.push(`<span class="chip okc">✅ הרב אישר</span>`);
     else if (st === 'rejected') meta.push(`<span class="chip badc">❌ הרב לא אישר</span>`);
     else if (st === 'seen') meta.push(`<span class="chip okc">👁 הרב ראה</span>`);
+    else if (st === 'answered') meta.push(`<span class="chip okc">✔ הבירור נענה</span>`);
   }
   if (t.parentTaskId){ const p = task(t.parentTaskId); meta.push(`<span class="chip fu">↳ המשך של: ${esc(p ? p.title : '—')}</span>`); }
   const fus = followups(t.id).filter(f => f.status === 'open').length;
   if (fus) meta.push(`<span class="chip fu">⤷ ${fus} המשך פתוח</span>`);
   const prog = S.Log.filter(l => String(l.taskId) === String(t.id) && l.result === 'progress').length;
   if (prog && !done) meta.push(`<span class="chip">◐ ${prog} תיעודים</span>`);
-  const lastRabbi = notesOf(t.id).filter(n => n.text && (n.action === 'comment' || n.action === 'approve')).pop();
+  const lastRabbi = notesOf(t.id).filter(n => n.text && (n.action === 'comment' || n.action === 'approve' || n.action === 'answer')).pop();
   const pri = inPri(t.id);
   return `<div class="task ${done ? 'done' : ''} ${isFuture(t) ? 'future' : ''}" data-id="${esc(t.id)}">
     ${ctx === 'pri' && isEditor ? `<span class="handle" title="גרור לשינוי סדר">⠿</span>` : ''}
@@ -695,6 +720,7 @@ function viewPri(){
   h += `<div class="card"><div class="card-h"><h2>⭐ עדיפויות</h2>
     ${isEditor && priBlocks(list).length > 1 ? `<button class="btn sm sec ${showGroupArrows ? 'on' : ''}" title="הצג/הסתר חיצים להזזת קטגוריות שלמות" onclick="showGroupArrows=!showGroupArrows;render()" style="${showGroupArrows ? 'background:var(--pri-soft);color:var(--pri)' : ''}">⏶⏷</button>` : ''}
     ${isEditor && list.length > 1 ? `<button class="btn sm sec" title="סדר מחדש לפי סדר הקטגוריות" onclick="if(confirm('לסדר את כל הרשימה לפי סדר הקטגוריות? (הסדר הפנימי בכל קטגוריה נשמר)'))sortPriByCat()">⇅ לפי קטגוריה</button>` : ''}
+    ${list.length ? `<button class="btn sm sec" title="העתק לוואטסאפ" onclick="copyPriWhatsApp()">📋</button>` : ''}
     ${isEditor ? `<button class="btn sm" onclick="openPicker()">＋ הוסף</button>` : ''}</div>`;
   if (isEditor) h += `<div class="qadd"><input type="text" id="qAdd" placeholder="✍️ משימה מהירה בלי קטגוריה… (Enter להוספה)" onkeydown="if(event.key==='Enter')quickAdd()"><button class="btn sm" onclick="quickAdd()">הוסף</button></div>`;
   if (!list.length) h += `<div class="empty">הרשימה ריקה.${isEditor ? '<br>הוסף משימות מהקטגוריות לפי סדר העבודה.' : ''}</div>`;
@@ -855,8 +881,8 @@ function openCat(id){
     const cur = document.getElementById('cRabbi').dataset.init !== undefined ? document.getElementById('cRabbi').value : ((c && c.rabbiDefault) || '');
     const pr = p && p.rabbiDefault && p.rabbiDefault !== 'none' ? p.rabbiDefault : '';
     const opts = p
-      ? [['', 'ירושה מ"' + p.name + '" (' + (pr ? 'כל משימה ' + RABBI_CAT_LABEL[pr] + ' הרב' : 'לא נשלח') + ')'], ['none','רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']]
-      : [['', 'רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']];
+      ? [['', 'ירושה מ"' + p.name + '" (' + (pr ? 'כל משימה ' + RABBI_CAT_LABEL[pr] + ' הרב' : 'לא נשלח') + ')'], ['none','רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['ask','כל משימה חדשה נשלחת לבירור מול הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']]
+      : [['', 'רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['ask','כל משימה חדשה נשלחת לבירור מול הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']];
     const v = (!p && cur === 'none') ? '' : cur;
     const sel = document.getElementById('cRabbi');
     sel.innerHTML = opts.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
@@ -916,7 +942,7 @@ function catAutoPri(id){
   if (c.autoPri === 'yes') return true; if (c.autoPri === 'no') return false;
   const p = c.parentId && cat(c.parentId); return !!(p && p.autoPri === 'yes');
 }
-const RABBI_CAT_LABEL = { approve:'לאישור', info:'לידיעה' };
+const RABBI_CAT_LABEL = { approve:'לאישור', ask:'לבירור', info:'לידיעה' };
 function applyCatRabbi(){
   const d = catRabbi(val('mCat')); if (!d) return;
   mRabbi = d;
@@ -958,6 +984,7 @@ function openTask(id, preset){
     <div class="fld"><label>הרב סגל</label><div class="seg" id="mRabSeg">
       <button type="button" data-r="" ${dis} class="${mRabbi === '' ? 'on' : ''}" onclick="mRabbi='';segOn('mRabSeg',this)">לא צריך</button>
       <button type="button" data-r="approve" ${dis} class="${mRabbi === 'approve' ? 'on' : ''}" onclick="mRabbi='approve';segOn('mRabSeg',this)">🕊️ לאישור הרב</button>
+      <button type="button" data-r="ask" ${dis} class="${mRabbi === 'ask' ? 'on' : ''}" onclick="mRabbi='ask';segOn('mRabSeg',this)">❓ בירור מול הרב</button>
       <button type="button" data-r="info" ${dis} class="${mRabbi === 'info' ? 'on' : ''}" onclick="mRabbi='info';segOn('mRabSeg',this)">👁 לידיעת הרב</button>
     </div>
     ${t && t.rabbiType && t.rabbiStatus && t.rabbiStatus !== 'pending' && !ro ? `<label class="row muted" style="gap:5px;margin-top:6px"><input type="checkbox" id="mResend"> לשלוח שוב לרב (חוזר לתיבה)</label>` : ''}
@@ -983,7 +1010,7 @@ function openTask(id, preset){
   if (!t) setTimeout(() => document.getElementById('mTitle').focus(), 50);
 }
 function noteLine(n){
-  const lab = { approve:'✅ אישר', reject:'❌ לא אישר', seen:'👁 ראה', comment:'💬', sent:'📤 נשלח לרב' }[n.action] || n.action;
+  const lab = { approve:'✅ אישר', reject:'❌ לא אישר', seen:'👁 ראה', answer:'✔ ענה', comment:'💬', sent:'📤 נשלח לרב' }[n.action] || n.action;
   return `<div><b>${esc(n.author || '')}</b> <span class="muted">${shortDate(n.date)}</span> ${lab}${n.text ? ': ' + esc(n.text) : ''}</div>`;
 }
 function segOn(id, b){ document.querySelectorAll('#' + id + ' button').forEach(x => x.classList.remove('on')); b.classList.add('on'); }
@@ -1002,7 +1029,7 @@ function saveTask(id, toPri, parentId){
   else if (newlySent) rec.rabbiStatus = 'pending';
   if (!old){ Object.assign(rec, { status:'open', parentTaskId: parentId || '', needsDecision:false, createdAt:now, doneDate:'' }); }
   ops.push(up('Tasks', rec));
-  if (newlySent) ops.push(up('RabbiNotes', { id:uid('n'), taskId:rec.id, author:author() || 'אני', date:todayISO(), action:'sent', text: mRabbi === 'approve' ? 'לאישור' : 'לידיעה' }));
+  if (newlySent) ops.push(up('RabbiNotes', { id:uid('n'), taskId:rec.id, author:author() || 'אני', date:todayISO(), action:'sent', text: RABBI_CAT_LABEL[mRabbi] || '' }));
   if (!old && (toPri || catAutoPri(rec.categoryId)) && !(rec.dueDate && rec.recurrence !== 'none' && rec.dueDate > todayISO())){ S.Tasks.push(rec); const pl = priInsert(priList(), [rec.id]); S.Tasks.pop(); ops.push(priOps(pl)); }
   closeModal();
   commit(ops, old ? 'נשמר' : (ops.some(o => o.op === 'setPriorities') ? '⭐ נוצרה ונוספה לעדיפויות' : 'המשימה נוצרה'));
@@ -1018,7 +1045,7 @@ function deleteTask(id){
 /* ---------- הרב סגל ---------- */
 function viewRabbi(){
   const pend = rabbiPending();
-  const ap = pend.filter(t => t.rabbiType === 'approve'), inf = pend.filter(t => t.rabbiType === 'info');
+  const ap = pend.filter(t => t.rabbiType === 'approve'), ask = pend.filter(t => t.rabbiType === 'ask'), inf = pend.filter(t => t.rabbiType === 'info');
   const waitDays = t => { const s = notesOf(t.id).filter(n => n.action === 'sent').pop(); const d = s ? s.date : String(t.createdAt || '').slice(0,10); return d ? daysBetween(d, todayISO()) : null; };
   const card = (t, kind) => {
     const notes = notesOf(t.id).filter(n => n.action !== 'sent');
@@ -1028,11 +1055,13 @@ function viewRabbi(){
       <div class="t-meta"><span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(catPath(t.categoryId))}</span>${t.dueDate ? `<span class="chip">📅 ${heDate(t.dueDate)}</span>` : ''}</div>
       ${t.notes ? `<div class="t-note">${esc(t.notes)}</div>` : ''}
       ${notes.length ? `<div class="thread">${notes.map(noteLine).join('')}</div>` : ''}
-      <textarea class="rinput" id="rin_${t.id}" placeholder="${kind === 'approve' ? 'הערה / הנחיה לביצוע…' : 'הערה…'}" style="margin-top:8px"></textarea>
+      <textarea class="rinput" id="rin_${t.id}" placeholder="${kind === 'approve' ? 'הערה / הנחיה לביצוע…' : kind === 'ask' ? 'תשובה / הערה…' : 'הערה…'}" style="margin-top:8px"></textarea>
       <div class="row" style="margin-top:8px">
         ${kind === 'approve'
           ? `<button class="btn sm ok" onclick="rabbiAct('${t.id}','approve')">✅ מאשר</button>
              <button class="btn sm bad" onclick="rabbiAct('${t.id}','reject')">❌ לא מאשר</button>`
+          : kind === 'ask'
+          ? `<button class="btn sm ok" onclick="rabbiAct('${t.id}','answer')">✔ עניתי — סגור בירור</button>`
           : `<button class="btn sm ok" onclick="rabbiAct('${t.id}','seen')">👁 ראיתי</button>`}
         <button class="btn sm sec" onclick="rabbiAct('${t.id}','comment')">💬 שמור הערה</button>
       </div></div>`;
@@ -1040,9 +1069,10 @@ function viewRabbi(){
   let h = `<div class="row" style="margin-bottom:12px"><span class="muted">רושם בשם: <b>${esc(author() || '—')}</b> <span class="link" onclick="askAuthor();render()">שנה</span></span>
     <span class="grow"></span><button class="btn sm sec" onclick="copyRabbiWhatsApp()">📋 העתק לוואטסאפ</button></div>`;
   h += `<div class="card"><div class="card-h" style="background:var(--rabbi-soft)"><h2>🕊️ ממתין לאישור (${ap.length})</h2></div>${ap.length ? ap.map(t => card(t,'approve')).join('') : '<div class="empty">אין משימות שממתינות לאישור</div>'}</div>`;
+  h += `<div class="card"><div class="card-h" style="background:#fff7ed"><h2>❓ בירור מול הרב (${ask.length})</h2></div>${ask.length ? ask.map(t => card(t,'ask')).join('') : '<div class="empty">אין בירורים פתוחים</div>'}</div>`;
   h += `<div class="card"><div class="card-h" style="background:var(--info-soft)"><h2>👁 לידיעה (${inf.length})</h2></div>${inf.length ? inf.map(t => card(t,'info')).join('') : '<div class="empty">אין משימות לידיעה</div>'}</div>`;
   const since = addDays(todayISO(), -14);
-  const recent = S.RabbiNotes.filter(n => ['approve','reject','seen'].includes(n.action) && n.date >= since).sort((a,b) => String(b.id).localeCompare(String(a.id))).slice(0, 25);
+  const recent = S.RabbiNotes.filter(n => ['approve','reject','seen','answer'].includes(n.action) && n.date >= since).sort((a,b) => String(b.id).localeCompare(String(a.id))).slice(0, 25);
   if (recent.length) h += `<div class="card"><div class="card-h"><h3>טופל לאחרונה</h3></div><div class="card-b">${recent.map(n => { const t = task(n.taskId); return `<div class="lg"><span class="muted">${shortDate(n.date)}</span> ${t ? `<span class="link" onclick="openTask('${t.id}')">${esc(t.title)}</span>` : '—'} · ${noteLine(n).replace(/^<div>|<\/div>$/g,'')}</div>`; }).join('')}</div></div>`;
   return h;
 }
@@ -1076,22 +1106,7 @@ function viewHours(){
     </div>`).join('') : `<div class="empty">לא נרשמו שעות ליום הזה</div>`;
   h += `</div></div>`;
 
-  // סיכום חודשי
-  const [yy, mm] = hoursMonth.split('-').map(Number);
-  const last = new Date(yy, mm, 0).getDate();
-  let rows = '', tot = 0, workDays = 0, offDays = 0;
-  for (let i = 1; i <= last; i++){
-    const di = hoursMonth + '-' + pad(i);
-    const m = dayMinutes(di), o = dayOff(di);
-    if (!m && !o) continue;
-    tot += m; if (m) workDays++; if (o) offDays++;
-    rows += `<tr><td><span class="link" onclick="setWorkDate('${di}')">${heDate(di)}</span> <span class="muted">${hebDate(di)}</span></td><td>${m ? fmtHours(m) : ''}</td><td class="off">${o ? '🏖️ ' + esc(o.reason || 'חופש') : ''}</td></tr>`;
-  }
-  const monthName = new Date(yy, mm-1, 1).toLocaleDateString('he-IL', { month:'long', year:'numeric' });
-  h += `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hours',-1)">→</button><h2 style="text-align:center">${monthName}<div class="muted" style="font-weight:500">${hebMonthsOf(hoursMonth)}</div></h2><button class="ib" onclick="shiftMonth('hours',1)">←</button></div>
-    <div class="card-b"><div class="row" style="gap:18px;margin-bottom:8px"><div><div class="muted">סה"כ שעות</div><div class="big">${fmtHours(tot)}</div></div>
-    <div><div class="muted">ימי עבודה</div><div class="big">${workDays}</div></div><div><div class="muted">ימי חופש</div><div class="big off">${offDays}</div></div></div>
-    ${rows ? `<table class="sum"><tr><th>יום</th><th>שעות</th><th></th></tr>${rows}</table>` : '<div class="empty">אין נתונים בחודש הזה</div>'}</div></div>`;
+  h += monthSection();
   return h;
 }
 function startNow(){ commit([ up('WorkHours', { id:uid('w'), date:workDate, start:nowHM(), end:'', note:'' }) ], '▶ התחלת סבב ' + nowHM()); }
@@ -1103,39 +1118,83 @@ function markOff(){
   commit([ up('DaysOff', { date:workDate, reason:r.trim() }) ], '🏖️ סומן יום חופש');
 }
 function shiftMonth(which, n){
-  const ref = which === 'hours' ? hoursMonth : histMonth;
+  const ref = hoursMonth;
   const [y, m] = ref.split('-').map(Number); const d = new Date(y, m-1+n, 1);
   const v = d.getFullYear() + '-' + pad(d.getMonth()+1);
-  if (which === 'hours') hoursMonth = v; else histMonth = v;
+  hoursMonth = v;
   render();
 }
 
-/* ---------- היסטוריה ---------- */
-let histMonth = todayISO().slice(0,7);
-function viewHist(){
-  const [yy, mm] = histMonth.split('-').map(Number);
-  const monthName = new Date(yy, mm-1, 1).toLocaleDateString('he-IL', { month:'long', year:'numeric' });
+/* ---------- היסטוריה וסיכום חודש (באותה לשונית) ---------- */
+let openDays = {};
+function monthDays(ym){
   const days = new Set();
-  S.Log.forEach(l => l.date && l.date.startsWith(histMonth) && days.add(l.date));
-  S.WorkHours.forEach(w => w.date && w.date.startsWith(histMonth) && days.add(w.date));
-  S.DaysOff.forEach(o => o.date && o.date.startsWith(histMonth) && days.add(o.date));
-  S.RabbiNotes.forEach(n => n.date && n.date.startsWith(histMonth) && n.action !== 'sent' && days.add(n.date));
-  const sorted = [...days].sort().reverse();
-  let h = `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hist',-1)">→</button><h2 style="text-align:center">${monthName}<div class="muted" style="font-weight:500">${hebMonthsOf(histMonth)}</div></h2><button class="ib" onclick="shiftMonth('hist',1)">←</button></div>`;
-  if (!sorted.length) h += `<div class="empty">אין פעילות בחודש הזה</div>`;
-  sorted.forEach(d => {
-    const logs = S.Log.filter(l => l.date === d);
+  const add = d => d && String(d).startsWith(ym) && days.add(d);
+  S.Log.forEach(l => add(l.date)); S.WorkHours.forEach(w => add(w.date)); S.DaysOff.forEach(o => add(o.date));
+  S.RabbiNotes.forEach(n => n.action !== 'sent' && add(n.date));
+  return [...days].sort().reverse();
+}
+function monthSection(){
+  const ym = hoursMonth;
+  const [yy, mm] = ym.split('-').map(Number);
+  const monthName = new Date(yy, mm-1, 1).toLocaleDateString('he-IL', { month:'long', year:'numeric' });
+  const days = monthDays(ym);
+  let tot = 0, workDays = 0, offDays = 0, doneCnt = 0;
+  days.forEach(d => { const m = dayMinutes(d); tot += m; if (m) workDays++; if (dayOff(d)) offDays++; });
+  doneCnt = S.Log.filter(l => String(l.date).startsWith(ym) && l.result === 'done').length;
+  let h = `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hours',-1)">→</button><h2 style="text-align:center">${monthName}<div class="muted" style="font-weight:500">${hebMonthsOf(ym)}</div></h2><button class="ib" onclick="shiftMonth('hours',1)">←</button></div>
+    <div class="card-b"><div class="row" style="gap:18px">
+      <div><div class="muted">סה"כ שעות</div><div class="big">${fmtHours(tot)}</div></div>
+      <div><div class="muted">ימי עבודה</div><div class="big">${workDays}</div></div>
+      <div><div class="muted">ממוצע ליום</div><div class="big">${workDays ? fmtHours(tot / workDays) : '—'}</div></div>
+      <div><div class="muted">ימי חופש</div><div class="big off">${offDays}</div></div>
+      <div><div class="muted">משימות שבוצעו</div><div class="big" style="color:var(--ok)">${doneCnt}</div></div>
+      <span class="grow"></span>${days.length ? `<button class="btn sm sec" onclick="copyMonthWhatsApp()">📋 העתק דוח</button>` : ''}
+    </div></div>`;
+  if (!days.length) h += `<div class="empty">אין פעילות בחודש הזה</div>`;
+  days.forEach(d => {
     const m = dayMinutes(d), o = dayOff(d);
-    const rn = S.RabbiNotes.filter(n => n.date === d && n.action !== 'sent');
-    h += `<div class="day"><div class="day-h"><span>${heDate(d, true)}</span>
-      ${m ? `<span class="chip">⏱️ ${fmtHours(m)}</span>` : ''}${o ? `<span class="chip rec">🏖️ ${esc(o.reason || 'חופש')}</span>` : ''}
-      <span class="grow"></span>${isEditor ? `<button class="btn ghost sm" onclick="setWorkDate('${d}');go('pri')">תעד ליום הזה</button>` : ''}</div>
-      ${logs.map(logLine).join('')}
-      ${rn.map(n => { const t = task(n.taskId); return `<div class="lg">🕊️ <span>${t ? esc(t.title) : '—'} · ${noteLine(n).replace(/^<div>|<\/div>$/g,'')}</span></div>`; }).join('')}
-    </div>`;
+    const logs = S.Log.filter(l => l.date === d);
+    const dn = logs.filter(l => l.result === 'done').length;
+    const op = !!openDays[d];
+    h += `<div class="day ${op ? 'open' : ''}"><div class="day-h dayrow" onclick="openDays['${d}']=!openDays['${d}'];render()">
+      <span class="caret" style="transform:rotate(${op ? 0 : 90}deg)">▼</span>
+      <span>${heDate(d)} <span class="muted">${hebDate(d)}</span></span>
+      <span class="grow"></span>
+      ${o ? `<span class="chip rec">🏖️ ${esc(o.reason || 'חופש')}</span>` : ''}
+      ${dn ? `<span class="chip okc">✓ ${dn}</span>` : ''}
+      <span class="hrs">${m ? fmtHours(m) : '—'}</span></div>`;
+    if (op) h += dayDetail(d);
+    h += `</div>`;
   });
   h += `</div>`;
   return h;
+}
+function dayDetail(d){
+  const ivs = S.WorkHours.filter(w => w.date === d).sort((a,b) => String(a.start).localeCompare(String(b.start)));
+  const logs = S.Log.filter(l => l.date === d);
+  const rn = S.RabbiNotes.filter(n => n.date === d && n.action !== 'sent');
+  let h = `<div class="dd">`;
+  if (ivs.length) h += `<div class="dd-s">⏱️ שעות</div>` + ivs.map(w => `<div class="lg"><span>${esc(w.start || '?')}–${esc(w.end || 'פתוח')}</span> <span class="chip">${w.end ? fmtHours(ivMinutes(w)) : 'פתוח'}</span>${w.note ? ` <span class="muted">${esc(w.note)}</span>` : ''}</div>`).join('');
+  if (logs.length) h += `<div class="dd-s">📝 משימות</div>` + logs.map(logLine).join('');
+  if (rn.length) h += `<div class="dd-s">🕊️ הרב סגל</div>` + rn.map(n => { const t = task(n.taskId); return `<div class="lg"><span>${t ? esc(t.title) : '—'} · ${noteLine(n).replace(/^<div>|<\/div>$/g,'')}</span></div>`; }).join('');
+  if (!ivs.length && !logs.length && !rn.length) h += `<div class="muted">אין פירוט</div>`;
+  if (isEditor && d !== workDate) h += `<div style="margin-top:8px"><button class="btn sm sec" onclick="setWorkDate('${d}');window.scrollTo(0,0)">📅 תעד / ערוך שעות ליום הזה</button></div>`;
+  return h + `</div>`;
+}
+function copyMonthWhatsApp(){
+  const ym = hoursMonth; const [yy, mm] = ym.split('-').map(Number);
+  const days = monthDays(ym).slice().reverse();
+  let tot = 0, wd = 0;
+  let s = '*דוח שעות — ' + new Date(yy, mm-1, 1).toLocaleDateString('he-IL', { month:'long', year:'numeric' }) + '* (' + hebMonthsOf(ym) + ')\n\n';
+  days.forEach(d => {
+    const m = dayMinutes(d), o = dayOff(d); if (!m && !o) return;
+    tot += m; if (m) wd++;
+    const ivs = S.WorkHours.filter(w => w.date === d && w.start).sort((a,b) => String(a.start).localeCompare(String(b.start))).map(w => w.start + '–' + (w.end || '?')).join(', ');
+    s += heDate(d) + ' · ' + hebDate(d) + ': ' + (o ? '🏖️ ' + (o.reason || 'חופש') : fmtHours(m) + (ivs ? ' (' + ivs + ')' : '')) + '\n';
+  });
+  s += '\n*סה"כ: ' + fmtHours(tot) + ' שעות · ' + wd + ' ימי עבודה*';
+  copyText(s);
 }
 
 /* =========================================================

@@ -19,7 +19,7 @@ var HEADERS = {
   DaysOff: ['date', 'reason'],
   Settings: ['key', 'value']
 };
-var VERSION = 3;
+var VERSION = 4;
 var EDITABLE = ['Categories', 'Tasks', 'Log', 'RabbiNotes', 'WorkHours', 'DaysOff'];
 
 function doGet(e) { return handle_((e && e.parameter) || {}); }
@@ -90,10 +90,10 @@ function batch_(ops) {
 }
 
 // ---------- פעולות הרב סגל (פתוח לכולם) ----------
-// act: approve | reject | seen | comment
+// act: approve | reject | seen | answer | comment
 function rabbiAction_(p) {
   var act = String(p.act || '');
-  if (['approve', 'reject', 'seen', 'comment'].indexOf(act) < 0) throw new Error('פעולה לא מוכרת');
+  if (['approve', 'reject', 'seen', 'answer', 'comment'].indexOf(act) < 0) throw new Error('פעולה לא מוכרת');
   var task = findById_('Tasks', p.taskId);
   if (!task) throw new Error('המשימה לא נמצאה');
   var now = new Date().toISOString();
@@ -106,7 +106,7 @@ function rabbiAction_(p) {
     text: String(p.text || '').slice(0, 2000)
   });
   if (act !== 'comment') {
-    var status = act === 'approve' ? 'approved' : act === 'reject' ? 'rejected' : 'seen';
+    var status = { approve: 'approved', reject: 'rejected', seen: 'seen', answer: 'answered' }[act];
     upsert_('Tasks', { id: task.id, rabbiStatus: status, updatedAt: now });
   }
   if (act === 'reject') {
