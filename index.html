@@ -783,7 +783,7 @@ function viewCats(){
     h += `<div class="card ${col ? 'collapsed' : ''}">
       <div class="card-h cat-h" onclick="toggleCol('${r.id}')">
         <span class="caret">▼</span><span class="cdot" style="background:${catColor(r.id)}"></span>
-        <h2>${esc(r.name)}${r.rabbiDefault ? ' <span class="chip rab">🕊️ ' + (r.rabbiDefault === 'approve' ? 'לאישור' : 'לידיעה') + '</span>' : ''} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
+        <h2>${esc(r.name)}${catRabbi(r.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(r.id)] + '</span>' : ''} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
         ${isEditor ? `<button class="ib" title="משימה חדשה בקטגוריה" onclick="event.stopPropagation();openTask(null,{categoryId:'${r.id}'})">＋</button>
         <button class="ib" title="עריכת קטגוריה" onclick="event.stopPropagation();openCat('${r.id}')">✎</button>` : ''}
       </div><div class="cbody">
@@ -792,7 +792,7 @@ function viewCats(){
         const st = S.Tasks.filter(t => String(t.categoryId) === String(s.id) && visible(t)).sort(sortT);
         const sc = collapsed[s.id];
         return `<div class="sub ${sc ? 'collapsed' : ''}"><div class="sub-h" onclick="toggleCol('${s.id}')"><span class="caret">▼</span><span class="cdot" style="background:${catColor(s.id)}"></span>
-          <span class="grow">${esc(s.name)} <span class="cnt">(${st.filter(t => t.status === 'open' && !isFuture(t)).length})</span></span>
+          <span class="grow">${esc(s.name)}${catRabbi(s.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(s.id)] + '</span>' : ''} <span class="cnt">(${st.filter(t => t.status === 'open' && !isFuture(t)).length})</span></span>
           ${isEditor ? `<button class="ib" title="משימה חדשה" onclick="event.stopPropagation();openTask(null,{categoryId:'${s.id}'})">＋</button>
           <button class="ib" title="עריכה" onclick="event.stopPropagation();openCat('${s.id}')">✎</button>` : ''}</div>
           <div class="cbody sub-b">${st.length ? st.map(t => taskRow(t,'cat')).join('') : '<div class="empty">אין משימות</div>'}</div></div>`;
@@ -818,11 +818,8 @@ function openCat(id){
       <option value="">— קטגוריה ראשית —</option>
       ${parents.map(p => `<option value="${p.id}" ${c && String(c.parentId) === String(p.id) ? 'selected' : ''}>תת־קטגוריה של: ${esc(p.name)}</option>`).join('')}
     </select>${hasKids ? '<div class="muted">יש לה תת־קטגוריות, לכן היא נשארת ראשית.</div>' : ''}</div>
-    <div class="fld"><label>🕊️ הרב סגל</label><select id="cRabbi">
-      <option value="">רגילה — לא נשלח אוטומטית</option>
-      <option value="approve" ${c && c.rabbiDefault === 'approve' ? 'selected' : ''}>כל משימה חדשה נשלחת לאישור הרב</option>
-      <option value="info" ${c && c.rabbiDefault === 'info' ? 'selected' : ''}>כל משימה חדשה נשלחת לידיעת הרב</option>
-    </select><div class="muted">בכל משימה אפשר עדיין לבחור לאישור או לידיעה. תת־קטגוריות יורשות את ההגדרה.</div></div>
+    <div class="fld"><label>🕊️ הרב סגל</label><select id="cRabbi"></select>
+    <div class="muted">בכל משימה אפשר עדיין לבחור לאישור או לידיעה. תת־קטגוריה יורשת מהקטגוריה שמעליה, אלא אם תשנה כאן.</div></div>
     <div class="two"><div class="fld"><label>צבע</label><input type="color" id="cColor" value="${color}" style="width:100%;height:40px;border:1px solid #cbd5e1;border-radius:10px"></div>
     <div class="fld"><label>מיקום (מספר)</label><input type="text" inputmode="numeric" id="cOrder" value="${c ? c.order : (S.Categories.length + 1)}"></div></div>
     <div class="mfoot">
@@ -830,6 +827,20 @@ function openCat(id){
       ${c ? `<button class="btn bad" onclick="deleteCat('${c.id}')">מחק</button>` : ''}
       <button class="btn sec" onclick="closeModal()">ביטול</button>
     </div>`);
+  const fillR = () => {
+    const pid = document.getElementById('cParent').value, p = pid && cat(pid);
+    const cur = document.getElementById('cRabbi').dataset.init !== undefined ? document.getElementById('cRabbi').value : ((c && c.rabbiDefault) || '');
+    const pr = p && p.rabbiDefault && p.rabbiDefault !== 'none' ? p.rabbiDefault : '';
+    const opts = p
+      ? [['', 'ירושה מ"' + p.name + '" (' + (pr ? 'כל משימה ' + RABBI_CAT_LABEL[pr] + ' הרב' : 'לא נשלח') + ')'], ['none','רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']]
+      : [['', 'רגילה — לא נשלח אוטומטית'], ['approve','כל משימה חדשה נשלחת לאישור הרב'], ['info','כל משימה חדשה נשלחת לידיעת הרב']];
+    const v = (!p && cur === 'none') ? '' : cur;
+    const sel = document.getElementById('cRabbi');
+    sel.innerHTML = opts.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    sel.dataset.init = '1';
+  };
+  fillR();
+  document.getElementById('cParent').addEventListener('change', fillR);
   setTimeout(() => document.getElementById('cName').focus(), 50);
 }
 function saveCat(id){
@@ -846,7 +857,15 @@ function deleteCat(id){
 }
 
 // ברירת מחדל של הרב סגל לקטגוריה (תת־קטגוריה יורשת מהאב)
-function catRabbi(id){ const c = cat(id); if (!c) return ''; if (c.rabbiDefault) return c.rabbiDefault; const p = c.parentId && cat(c.parentId); return (p && p.rabbiDefault) || ''; }
+// ערכים: '' = ירושה (בתת־קטגוריה) / ללא (בראשית) · 'none' = ללא, גם אם האב שולח · 'approve' · 'info'
+function catRabbi(id){
+  const c = cat(id); if (!c) return '';
+  if (c.rabbiDefault === 'none') return '';
+  if (c.rabbiDefault) return c.rabbiDefault;
+  const p = c.parentId && cat(c.parentId);
+  return p && p.rabbiDefault && p.rabbiDefault !== 'none' ? p.rabbiDefault : '';
+}
+const RABBI_CAT_LABEL = { approve:'לאישור', info:'לידיעה' };
 function applyCatRabbi(){
   const d = catRabbi(val('mCat')); if (!d) return;
   mRabbi = d;
