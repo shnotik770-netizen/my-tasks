@@ -220,7 +220,7 @@ const LS = {
   gas: 'mt_gas', code: 'mt_code', data: 'mt_data', queue: 'mt_queue', author: 'mt_author',
   tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone', showFuture: 'mt_showfuture'
 };
-const NEEDED_SERVER_VERSION = 2;
+const NEEDED_SERVER_VERSION = 3;
 const SHEET_KEYS = { Categories:'id', Tasks:'id', Log:'id', RabbiNotes:'id', WorkHours:'id', DaysOff:'date', Priorities:'taskId' };
 const REC_LABEL = { none:'ללא', daily:'יומית', weekly:'שבועית', monthly:'חודשית', bimonthly:'דו־חודשית', yearly:'שנתית' };
 const PALETTE = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#4b5563','#65a30d','#9333ea'];
@@ -805,7 +805,7 @@ function viewCats(){
     h += `<div class="card ${col ? 'collapsed' : ''}">
       <div class="card-h cat-h" onclick="toggleCol('${r.id}')">
         <span class="caret">▼</span><span class="cdot" style="background:${catColor(r.id)}"></span>
-        <h2>${esc(r.name)}${catRabbi(r.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(r.id)] + '</span>' : ''} <span class="cnt">(${total})${fut && !showFuture ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
+        <h2>${esc(r.name)}${catRabbi(r.id) ? ' <span class="chip rab">🕊️ ' + RABBI_CAT_LABEL[catRabbi(r.id)] + '</span>' : ''}${catAutoPri(r.id) ? ' <span class="chip" style="background:#fef3c7;color:#92400e">★ אוטומטי</span>' : ''} <span class="cnt">(${total})${fut && !showFuture ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
         ${isEditor ? `<button class="ib" title="משימה חדשה בקטגוריה" onclick="event.stopPropagation();openTask(null,{categoryId:'${r.id}'})">＋</button>
         <button class="ib" title="עריכת קטגוריה" onclick="event.stopPropagation();openCat('${r.id}')">✎</button>` : ''}
       </div><div class="cbody">
@@ -842,6 +842,7 @@ function openCat(id){
     </select>${hasKids ? '<div class="muted">יש לה תת־קטגוריות, לכן היא נשארת ראשית.</div>' : ''}</div>
     <div class="fld"><label>🕊️ הרב סגל</label><select id="cRabbi"></select>
     <div class="muted">בכל משימה אפשר עדיין לבחור לאישור או לידיעה. תת־קטגוריה יורשת מהקטגוריה שמעליה, אלא אם תשנה כאן.</div></div>
+    <div class="fld"><label>⭐ עדיפויות</label><select id="cAuto"></select></div>
     <div class="two"><div class="fld"><label>צבע</label><input type="color" id="cColor" value="${color}" style="width:100%;height:40px;border:1px solid #cbd5e1;border-radius:10px"></div>
     <div class="fld"><label>מיקום (מספר)</label><input type="text" inputmode="numeric" id="cOrder" value="${c ? c.order : (S.Categories.length + 1)}"></div></div>
     <div class="mfoot">
@@ -862,13 +863,35 @@ function openCat(id){
     sel.dataset.init = '1';
   };
   fillR();
+  const fillA = () => {
+    const pid = document.getElementById('cParent').value, p = pid && cat(pid);
+    const sel = document.getElementById('cAuto');
+    const cur = sel.dataset.init ? sel.value : ((c && c.autoPri) || '');
+    const opts = p
+      ? [['', 'ירושה מ"' + p.name + '" (' + (p.autoPri === 'yes' ? 'נכנסת אוטומטית' : 'רק כשמסמנים ☆') + ')'], ['no','רק כשמסמנים ☆'], ['yes','כל משימה חדשה נכנסת אוטומטית לעדיפויות']]
+      : [['', 'רק כשמסמנים ☆'], ['yes','כל משימה חדשה נכנסת אוטומטית לעדיפויות']];
+    const v = (!p && cur === 'no') ? '' : cur;
+    sel.innerHTML = opts.map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    sel.dataset.init = '1';
+  };
+  fillA();
+  document.getElementById('cParent').addEventListener('change', fillA);
   document.getElementById('cParent').addEventListener('change', fillR);
   setTimeout(() => document.getElementById('cName').focus(), 50);
 }
 function saveCat(id){
   const name = val('cName').trim(); if (!name){ toast('חסר שם', true); return; }
-  const rec = { id: id || uid('c'), name, parentId: document.getElementById('cParent').value, color: val('cColor'), order: Number(val('cOrder')) || 0, active: true, rabbiDefault: val('cRabbi') };
-  closeModal(); commit([ up('Categories', rec) ], 'הקטגוריה נשמרה');
+  const rec = { id: id || uid('c'), name, parentId: document.getElementById('cParent').value, color: val('cColor'), order: Number(val('cOrder')) || 0, active: true, rabbiDefault: val('cRabbi'), autoPri: val('cAuto') };
+  const before = id ? catAutoPri(id) : false;
+  const ops = [ up('Categories', rec) ];
+  closeModal();
+  applyOps(ops);
+  // הופעלה עכשיו כניסה אוטומטית — להציע להכניס גם את המשימות הפתוחות שכבר קיימות
+  if (!before && catAutoPri(rec.id)){
+    const ids = openTasks().filter(t => !isFuture(t) && !inPri(t.id) && (String(t.categoryId) === String(rec.id) || String((cat(t.categoryId) || {}).parentId) === String(rec.id)) && catAutoPri(t.categoryId)).map(t => t.id);
+    if (ids.length && confirm('להכניס לעדיפויות גם את ' + ids.length + ' המשימות הפתוחות שכבר נמצאות בקטגוריה?')) ops.push(priOps(priInsert(priList(), ids)));
+  }
+  commit(ops, 'הקטגוריה נשמרה');
 }
 function deleteCat(id){
   const used = liveTasks().some(t => String(t.categoryId) === String(id));
@@ -886,6 +909,12 @@ function catRabbi(id){
   if (c.rabbiDefault) return c.rabbiDefault;
   const p = c.parentId && cat(c.parentId);
   return p && p.rabbiDefault && p.rabbiDefault !== 'none' ? p.rabbiDefault : '';
+}
+// כניסה אוטומטית לעדיפויות: 'yes' / 'no' / '' (בתת־קטגוריה = ירושה מהאב)
+function catAutoPri(id){
+  const c = cat(id); if (!c) return false;
+  if (c.autoPri === 'yes') return true; if (c.autoPri === 'no') return false;
+  const p = c.parentId && cat(c.parentId); return !!(p && p.autoPri === 'yes');
 }
 const RABBI_CAT_LABEL = { approve:'לאישור', info:'לידיעה' };
 function applyCatRabbi(){
@@ -974,9 +1003,9 @@ function saveTask(id, toPri, parentId){
   if (!old){ Object.assign(rec, { status:'open', parentTaskId: parentId || '', needsDecision:false, createdAt:now, doneDate:'' }); }
   ops.push(up('Tasks', rec));
   if (newlySent) ops.push(up('RabbiNotes', { id:uid('n'), taskId:rec.id, author:author() || 'אני', date:todayISO(), action:'sent', text: mRabbi === 'approve' ? 'לאישור' : 'לידיעה' }));
-  if (toPri && !old){ S.Tasks.push(rec); const pl = priInsert(priList(), [rec.id]); S.Tasks.pop(); ops.push(priOps(pl)); }
+  if (!old && (toPri || catAutoPri(rec.categoryId)) && !(rec.dueDate && rec.recurrence !== 'none' && rec.dueDate > todayISO())){ S.Tasks.push(rec); const pl = priInsert(priList(), [rec.id]); S.Tasks.pop(); ops.push(priOps(pl)); }
   closeModal();
-  commit(ops, old ? 'נשמר' : (toPri ? '⭐ נוצרה ונוספה לעדיפויות' : 'המשימה נוצרה'));
+  commit(ops, old ? 'נשמר' : (ops.some(o => o.op === 'setPriorities') ? '⭐ נוצרה ונוספה לעדיפויות' : 'המשימה נוצרה'));
 }
 function deleteTask(id){
   if (!confirm('למחוק את המשימה?')) return;

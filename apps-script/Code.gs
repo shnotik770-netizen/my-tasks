@@ -9,7 +9,7 @@
 
 // מבנה הגיליונות: שם ← עמודות. העמודה הראשונה היא המפתח.
 var HEADERS = {
-  Categories: ['id', 'name', 'parentId', 'color', 'order', 'active', 'rabbiDefault'],
+  Categories: ['id', 'name', 'parentId', 'color', 'order', 'active', 'rabbiDefault', 'autoPri'],
   Tasks: ['id', 'title', 'categoryId', 'dueDate', 'recurrence', 'status', 'continuous', 'parentTaskId',
           'rabbiType', 'rabbiStatus', 'needsDecision', 'notes', 'createdAt', 'updatedAt', 'doneDate', 'fixedSchedule'],
   Log: ['id', 'taskId', 'date', 'result', 'note', 'createdAt'],
@@ -19,7 +19,7 @@ var HEADERS = {
   DaysOff: ['date', 'reason'],
   Settings: ['key', 'value']
 };
-var VERSION = 2;
+var VERSION = 3;
 var EDITABLE = ['Categories', 'Tasks', 'Log', 'RabbiNotes', 'WorkHours', 'DaysOff'];
 
 function doGet(e) { return handle_((e && e.parameter) || {}); }
