@@ -95,6 +95,8 @@ main{padding-top:14px}
 .pnum{font-weight:800;color:var(--pri);min-width:20px;text-align:center;flex:none;margin-top:2px}
 .pnote{width:100%;border:0;border-bottom:1px dashed var(--line);font-size:13px;padding:3px 0;margin-top:4px;background:transparent;color:#334155}
 .pnote:focus{outline:none;border-color:var(--pri)}
+.pgh{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#f8fafc;border-bottom:1px solid var(--line);border-top:1px solid var(--line);font-weight:700;font-size:13.5px;color:#334155}
+.pgh:first-child{border-top:0}
 .sortable-ghost{opacity:.35;background:var(--pri-soft)}
 
 /* קטגוריות */
@@ -289,6 +291,40 @@ const childrenOf = id => catsSorted().filter(c => String(c.parentId) === String(
 function catPath(id){ const c = cat(id); if(!c) return 'ללא קטגוריה'; const p = c.parentId ? cat(c.parentId) : null; return p ? p.name + ' › ' + c.name : c.name; }
 function catColor(id){ const c = cat(id); if(!c) return '#94a3b8'; if(c.color) return c.color; const p = c.parentId && cat(c.parentId); return (p && p.color) || '#64748b'; }
 function priList(){ return S.Priorities.slice().sort((a,b) => (+a.order||0) - (+b.order||0)).filter(p => { const t = task(p.taskId); return t && t.status === 'open'; }); }
+const isFuture = t => t.status === 'open' && t.recurrence && t.recurrence !== 'none' && t.dueDate && t.dueDate > todayISO();
+function rootOf(catId){ const c = cat(catId); return c ? (c.parentId ? String(c.parentId) : String(c.id)) : ''; }
+function rootOrder(rid){ const c = cat(rid); return c ? (+c.order || 0) : 9999; }
+// הוספה לעדיפויות: נכנסת אחרי המשימה האחרונה מאותה קטגוריה, ואם אין — לפי סדר הקטגוריות
+function priInsert(list, ids){
+  list = list.slice();
+  ids.forEach(id => {
+    if (list.some(p => String(p.taskId) === String(id))) return;
+    const t = task(id); const r = t ? rootOf(t.categoryId) : '';
+    let at = -1;
+    list.forEach((p, i) => { const pt = task(p.taskId); if (pt && rootOf(pt.categoryId) === r) at = i; });
+    if (at < 0){ at = list.findIndex(p => { const pt = task(p.taskId); return pt && rootOrder(rootOf(pt.categoryId)) > rootOrder(r); }); if (at < 0) at = list.length; else at -= 1; }
+    list.splice(at + 1, 0, { taskId:id, note:'' });
+  });
+  return list;
+}
+function sortPriByCat(){
+  const list = priList().map((p,i) => ({ p, i }));
+  list.sort((a,b) => { const ta = task(a.p.taskId), tb = task(b.p.taskId);
+    return rootOrder(rootOf(ta.categoryId)) - rootOrder(rootOf(tb.categoryId)) || rootOf(ta.categoryId).localeCompare(rootOf(tb.categoryId)) || a.i - b.i; });
+  commit([ priOps(list.map(x => x.p)) ], 'מוין לפי קטגוריות');
+}
+function priBlocks(list){
+  const blocks = [];
+  list.forEach((p, i) => { const t = task(p.taskId); const r = rootOf(t.categoryId); const last = blocks[blocks.length-1];
+    if (last && last.root === r) last.end = i; else blocks.push({ root:r, start:i, end:i }); });
+  return blocks;
+}
+function moveBlock(bi, dir){
+  const list = priList(); const bl = priBlocks(list); const a = bl[bi], b = bl[bi+dir]; if (!a || !b) return;
+  const first = dir < 0 ? b : a, second = dir < 0 ? a : b;
+  const out = list.slice(0, first.start).concat(list.slice(second.start, second.end+1), list.slice(first.start, first.end+1), list.slice(second.end+1));
+  commit([ priOps(out) ]);
+}
 const inPri = id => S.Priorities.some(p => String(p.taskId) === String(id));
 const notesOf = id => S.RabbiNotes.filter(n => String(n.taskId) === String(id)).sort((a,b) => String(a.id).localeCompare(String(b.id)));
 const rabbiPending = () => liveTasks().filter(t => t.rabbiType && t.rabbiStatus === 'pending');
@@ -421,11 +457,11 @@ function finishDone(id, note){
   let msg = '✓ סומן כבוצע' + (workDate !== todayISO() ? ' ב-' + shortDate(workDate) : '');
   const rec = t.recurrence || 'none';
   if (rec !== 'none'){
-    const base = t.dueDate || workDate;
-    let nd = nextDue(base, rec);
-    // אם בוצע באיחור גדול — מדלגים על מועדים שכבר עברו, כדי שהמופע הבא לא ייווצר באיחור
-    while (nd && nd <= workDate) nd = nextDue(nd, rec);
-    ops.push(up('Tasks', { id:uid('t'), title:t.title, categoryId:t.categoryId, dueDate:nd, recurrence:rec, status:'open', continuous:truthy(t.continuous),
+    const fixed = truthy(t.fixedSchedule) && t.dueDate;
+    // רגיל: המועד הבא נספר מיום הביצוע. תאריך קבוע: לפי תאריך היעד (ומדלגים על מועדים שעברו)
+    let nd = nextDue(fixed ? t.dueDate : workDate, rec);
+    if (fixed) while (nd && nd <= workDate) nd = nextDue(nd, rec);
+    ops.push(up('Tasks', { id:uid('t'), title:t.title, categoryId:t.categoryId, dueDate:nd, recurrence:rec, fixedSchedule:truthy(t.fixedSchedule), status:'open', continuous:truthy(t.continuous),
       parentTaskId:'', rabbiType:'', rabbiStatus:'', needsDecision:false, notes:t.notes||'', createdAt:now, updatedAt:now, doneDate:'' }));
     msg += ' · הבאה: ' + heDate(nd);
   }
@@ -457,7 +493,7 @@ function togglePri(id){
   if (!isEditor) return;
   const list = priList();
   if (inPri(id)) commit([ priOps(list.filter(p => String(p.taskId) !== String(id))) ], 'הוסר מהעדיפויות');
-  else commit([ priOps(list.concat([{ taskId:id, note:'' }])) ], '⭐ נוסף לעדיפויות');
+  else commit([ priOps(priInsert(list, [id])) ], '⭐ נוסף לעדיפויות');
 }
 function setPriNote(id, note){
   const list = priList().map(p => String(p.taskId) === String(id) ? Object.assign({}, p, { note }) : p);
@@ -544,13 +580,15 @@ function render(){
 function taskRow(t, ctx, idx){
   const done = t.status === 'done';
   const meta = [];
-  if (ctx !== 'cat') meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(catPath(t.categoryId))}</span>`);
+  if (ctx === 'pri'){ const c = cat(t.categoryId); if (c && c.parentId) meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(c.name)}</span>`); }
+  else if (ctx !== 'cat') meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(catPath(t.categoryId))}</span>`);
   if (t.dueDate && !done){
     const dd = daysBetween(todayISO(), t.dueDate);
     meta.push(`<span class="chip ${dd < 0 ? 'late' : dd === 0 ? 'today' : ''}">📅 ${dd < 0 ? 'באיחור · ' : dd === 0 ? 'היום · ' : ''}${heDate(t.dueDate)}</span>`);
   }
   if (done && t.doneDate) meta.push(`<span class="chip okc">✓ ${heDate(t.doneDate)}</span>`);
-  if (t.recurrence && t.recurrence !== 'none') meta.push(`<span class="chip rec">↻ ${REC_LABEL[t.recurrence] || t.recurrence}</span>`);
+  if (t.recurrence && t.recurrence !== 'none') meta.push(`<span class="chip rec">↻ ${REC_LABEL[t.recurrence] || t.recurrence}${truthy(t.fixedSchedule) ? ' · 📌' : ''}</span>`);
+  if (isFuture(t)) meta.push(`<span class="chip">⏳ יופיע ב-${heDate(t.dueDate)}</span>`);
   if (truthy(t.continuous)) meta.push(`<span class="chip cont">🔁 מתמשכת</span>`);
   if (t.rabbiType){
     const st = t.rabbiStatus;
@@ -603,9 +641,18 @@ function viewPri(){
   }
   const list = priList();
   h += `<div class="card"><div class="card-h"><h2>⭐ רשימת עדיפויות</h2>
-    ${isEditor ? `<button class="btn sm" onclick="openPicker()">＋ הוסף מהקטגוריות</button>` : ''}</div>`;
+    ${isEditor && list.length > 1 ? `<button class="btn sm sec" title="סדר מחדש לפי סדר הקטגוריות" onclick="if(confirm('לסדר את כל הרשימה לפי סדר הקטגוריות? (הסדר הפנימי בכל קטגוריה נשמר)'))sortPriByCat()">⇅ לפי קטגוריה</button>` : ''}
+    ${isEditor ? `<button class="btn sm" onclick="openPicker()">＋ הוסף</button>` : ''}</div>`;
   if (!list.length) h += `<div class="empty">הרשימה ריקה.${isEditor ? '<br>הוסף משימות מהקטגוריות לפי סדר העבודה.' : ''}</div>`;
-  else h += `<div id="priList">` + list.map((p,i) => taskRow(task(p.taskId), 'pri', i)).join('') + `</div>`;
+  else {
+    const bl = priBlocks(list);
+    h += `<div id="priList">` + bl.map((b, bi) => {
+      const c = cat(b.root);
+      return `<div class="pgh"><span class="cdot" style="background:${catColor(b.root)}"></span><span class="grow">${esc(c ? c.name : 'ללא קטגוריה')} <span class="cnt">(${b.end - b.start + 1})</span></span>
+        ${isEditor ? `<button class="ib" title="הזז את כל הקטגוריה למעלה" ${bi === 0 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},-1)">⏶</button><button class="ib" title="הזז את כל הקטגוריה למטה" ${bi === bl.length-1 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},1)">⏷</button>` : ''}</div>`
+        + list.slice(b.start, b.end + 1).map((p, k) => taskRow(task(p.taskId), 'pri', b.start + k)).join('');
+    }).join('') + `</div>`;
+  }
   h += `</div>`;
   // הערות לפריטים ברשימה (שורה נפרדת מתחת לכל אחד) — עריכה מהירה
   if (list.length && isEditor){
@@ -644,11 +691,11 @@ let sortableInst = null;
 function initSortable(){
   const el = document.getElementById('priList');
   if (!el || !isEditor || !window.Sortable) return;
-  sortableInst = Sortable.create(el, { animation:150, forceFallback:true, fallbackTolerance:4, delay:180, delayOnTouchOnly:true, filter:'button,input,textarea,a', preventOnFilter:false, draggable:'.task', ghostClass:'sortable-ghost', onEnd: (e) => { if (e.oldIndex !== e.newIndex) movePri(e.oldIndex, e.newIndex); } });
+  sortableInst = Sortable.create(el, { animation:150, forceFallback:true, fallbackTolerance:4, delay:180, delayOnTouchOnly:true, filter:'button,input,textarea,a', preventOnFilter:false, draggable:'.task', ghostClass:'sortable-ghost', onEnd: (e) => { const o = e.oldDraggableIndex, n = e.newDraggableIndex; if (o !== n) movePri(o, n); else render(); } });
 }
 
 function openPicker(){
-  const avail = openTasks().filter(t => !inPri(t.id));
+  const avail = openTasks().filter(t => !inPri(t.id) && !isFuture(t));
   let h = `<h3>הוספה לרשימת העדיפויות</h3>
     <div class="fld"><input type="text" id="pkSearch" placeholder="🔍 חיפוש…" oninput="filterPicker(this.value)" style="width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:9px 10px"></div>
     <div class="pick" id="pickBox">`;
@@ -677,28 +724,30 @@ function addPicked(){
   const ids = [...document.querySelectorAll('#pickBox input:checked')].map(i => i.value);
   if (!ids.length){ toast('לא נבחרו משימות', true); return; }
   closeModal();
-  commit([ priOps(priList().concat(ids.map(id => ({ taskId:id, note:'' })))) ], '⭐ נוספו ' + ids.length + ' משימות');
+  commit([ priOps(priInsert(priList(), ids)) ], '⭐ נוספו ' + ids.length + ' משימות');
 }
 
 /* ---------- קטגוריות ---------- */
 function viewCats(){
   let h = `<div class="row" style="margin-bottom:12px">
-    <label class="row muted" style="gap:5px;cursor:pointer"><input type="checkbox" ${showDone ? 'checked' : ''} onchange="showDone=this.checked;lsSet(LS.showDone,showDone?'1':'0');render()"> הצג גם משימות שבוצעו</label>
+    <label class="row muted" style="gap:5px;cursor:pointer"><input type="checkbox" ${showDone ? 'checked' : ''} onchange="showDone=this.checked;lsSet(LS.showDone,showDone?'1':'0');render()"> הצג גם משימות שבוצעו ומשימות חוזרות שמועדן טרם הגיע</label>
     <span class="grow"></span>
     ${isEditor ? `<button class="btn sm sec" onclick="openCat(null)">＋ קטגוריה</button>` : ''}</div>`;
   const rs = roots();
   if (!rs.length) h += `<div class="card"><div class="empty">אין עדיין קטגוריות.${isEditor ? ' התחל ב"＋ קטגוריה".' : ''}</div></div>`;
-  const visible = t => t.status === 'open' || (showDone && t.status === 'done');
+  const visible = t => (t.status === 'open' && !isFuture(t)) || (showDone && (t.status === 'done' || isFuture(t)));
   const sortT = (a,b) => (a.status === b.status ? 0 : a.status === 'open' ? -1 : 1) || String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999')) || String(a.createdAt).localeCompare(String(b.createdAt));
   rs.forEach(r => {
     const subs = childrenOf(r.id);
     const own = S.Tasks.filter(t => String(t.categoryId) === String(r.id) && visible(t)).sort(sortT);
-    const total = S.Tasks.filter(t => t.status === 'open' && (String(t.categoryId) === String(r.id) || subs.some(s => String(s.id) === String(t.categoryId)))).length;
+    const inRoot = t => (String(t.categoryId) === String(r.id) || subs.some(s => String(s.id) === String(t.categoryId)));
+    const fut = S.Tasks.filter(t => isFuture(t) && inRoot(t)).length;
+    const total = S.Tasks.filter(t => t.status === 'open' && !isFuture(t) && (String(t.categoryId) === String(r.id) || subs.some(s => String(s.id) === String(t.categoryId)))).length;
     const col = collapsed[r.id];
     h += `<div class="card ${col ? 'collapsed' : ''}">
       <div class="card-h cat-h" onclick="toggleCol('${r.id}')">
         <span class="caret">▼</span><span class="cdot" style="background:${catColor(r.id)}"></span>
-        <h2>${esc(r.name)} <span class="cnt">(${total})</span></h2>
+        <h2>${esc(r.name)} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
         ${isEditor ? `<button class="ib" title="משימה חדשה בקטגוריה" onclick="event.stopPropagation();openTask(null,{categoryId:'${r.id}'})">＋</button>
         <button class="ib" title="עריכת קטגוריה" onclick="event.stopPropagation();openCat('${r.id}')">✎</button>` : ''}
       </div><div class="cbody">
@@ -707,7 +756,7 @@ function viewCats(){
         const st = S.Tasks.filter(t => String(t.categoryId) === String(s.id) && visible(t)).sort(sortT);
         const sc = collapsed[s.id];
         return `<div class="sub ${sc ? 'collapsed' : ''}"><div class="sub-h" onclick="toggleCol('${s.id}')"><span class="caret">▼</span><span class="cdot" style="background:${catColor(s.id)}"></span>
-          <span class="grow">${esc(s.name)} <span class="cnt">(${st.filter(t => t.status === 'open').length})</span></span>
+          <span class="grow">${esc(s.name)} <span class="cnt">(${st.filter(t => t.status === 'open' && !isFuture(t)).length})</span></span>
           ${isEditor ? `<button class="ib" title="משימה חדשה" onclick="event.stopPropagation();openTask(null,{categoryId:'${s.id}'})">＋</button>
           <button class="ib" title="עריכה" onclick="event.stopPropagation();openCat('${s.id}')">✎</button>` : ''}</div>
           <div class="cbody sub-b">${st.length ? st.map(t => taskRow(t,'cat')).join('') : '<div class="empty">אין משימות</div>'}</div></div>`;
@@ -785,7 +834,8 @@ function openTask(id, preset){
       <div class="fld"><label>קטגוריה</label><select id="mCat" ${dis}>${catOptions(t ? t.categoryId : (preset.categoryId || ''))}</select></div>
       <div class="fld"><label>תאריך יעד (לא חובה)</label><input type="date" id="mDue" ${dis} value="${esc(t ? t.dueDate : (preset.dueDate || ''))}"></div>
     </div>
-    <div class="fld"><label>חזרה</label><div class="seg" id="mRecSeg">${Object.keys(REC_LABEL).map(k => `<button type="button" ${dis} class="${mRec === k ? 'on' : ''}" onclick="mRec='${k}';segOn('mRecSeg',this)">${REC_LABEL[k]}</button>`).join('')}</div></div>
+    <div class="fld"><label>חזרה</label><div class="seg" id="mRecSeg">${Object.keys(REC_LABEL).map(k => `<button type="button" ${dis} class="${mRec === k ? 'on' : ''}" onclick="mRec='${k}';segOn('mRecSeg',this);document.getElementById('mFixedRow').style.display=mRec==='none'?'none':''">${REC_LABEL[k]}</button>`).join('')}</div>
+      <label id="mFixedRow" class="row muted" style="gap:6px;margin-top:7px;cursor:pointer;${mRec === 'none' ? 'display:none' : ''}"><input type="checkbox" id="mFixed" ${dis} ${t && truthy(t.fixedSchedule) ? 'checked' : ''}> 📌 תאריך קבוע: המועד הבא לפי תאריך היעד (למשל כל 10 בחודש), ולא לפי יום הביצוע</label></div>
     <div class="fld"><label class="row" style="gap:6px;cursor:pointer;color:var(--ink);font-size:15px;font-weight:500"><input type="checkbox" id="mCont" ${dis} ${t && truthy(t.continuous) ? 'checked' : ''}> 🔁 משימה מתמשכת <span class="muted">(נמשכת כמה ימים, נשארת ברשימה עד שמסיימים)</span></label></div>
     <div class="fld"><label>הרב סגל</label><div class="seg" id="mRabSeg">
       <button type="button" ${dis} class="${mRabbi === '' ? 'on' : ''}" onclick="mRabbi='';segOn('mRabSeg',this)">לא צריך</button>
@@ -826,7 +876,7 @@ function saveTask(id, toPri, parentId){
   const now = new Date().toISOString();
   const old = id ? task(id) : null;
   const rec = { id: id || uid('t'), title, categoryId: val('mCat'), dueDate: val('mDue'), recurrence: mRec,
-    continuous: document.getElementById('mCont').checked, notes: val('mNotes'), rabbiType: mRabbi, updatedAt: now };
+    continuous: document.getElementById('mCont').checked, fixedSchedule: document.getElementById('mFixed').checked, notes: val('mNotes'), rabbiType: mRabbi, updatedAt: now };
   const resend = document.getElementById('mResend') && document.getElementById('mResend').checked;
   const ops = [];
   const newlySent = mRabbi && (!old || old.rabbiType !== mRabbi || resend || !old.rabbiStatus);
@@ -835,7 +885,7 @@ function saveTask(id, toPri, parentId){
   if (!old){ Object.assign(rec, { status:'open', parentTaskId: parentId || '', needsDecision:false, createdAt:now, doneDate:'' }); }
   ops.push(up('Tasks', rec));
   if (newlySent) ops.push(up('RabbiNotes', { id:uid('n'), taskId:rec.id, author:author() || 'אני', date:todayISO(), action:'sent', text: mRabbi === 'approve' ? 'לאישור' : 'לידיעה' }));
-  if (toPri && !old) ops.push(priOps(priList().concat([{ taskId:rec.id, note:'' }])));
+  if (toPri && !old){ S.Tasks.push(rec); const pl = priInsert(priList(), [rec.id]); S.Tasks.pop(); ops.push(priOps(pl)); }
   closeModal();
   commit(ops, old ? 'נשמר' : (toPri ? '⭐ נוצרה ונוספה לעדיפויות' : 'המשימה נוצרה'));
 }

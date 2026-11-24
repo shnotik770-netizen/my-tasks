@@ -11,7 +11,7 @@
 var HEADERS = {
   Categories: ['id', 'name', 'parentId', 'color', 'order', 'active'],
   Tasks: ['id', 'title', 'categoryId', 'dueDate', 'recurrence', 'status', 'continuous', 'parentTaskId',
-          'rabbiType', 'rabbiStatus', 'needsDecision', 'notes', 'createdAt', 'updatedAt', 'doneDate'],
+          'rabbiType', 'rabbiStatus', 'needsDecision', 'notes', 'createdAt', 'updatedAt', 'doneDate', 'fixedSchedule'],
   Log: ['id', 'taskId', 'date', 'result', 'note', 'createdAt'],
   Priorities: ['taskId', 'order', 'note'],
   RabbiNotes: ['id', 'taskId', 'author', 'date', 'action', 'text'],
@@ -139,7 +139,19 @@ function sheet_(name) {
     s.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold');
     s.setFrozenRows(1);
   }
+  ensureColumns_(s, name);
   return s;
+}
+
+// מוסיף עמודות חדשות שנוספו ל-HEADERS (פעם אחת לכל גיליון בכל הרצה)
+var checkedCols_ = {};
+function ensureColumns_(s, name) {
+  if (checkedCols_[name] || !HEADERS[name]) return;
+  checkedCols_[name] = true;
+  var have = headers_(s);
+  var missing = HEADERS[name].filter(function (h) { return have.indexOf(h) < 0; });
+  if (!missing.length) return;
+  s.getRange(1, have.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
 }
 
 function headers_(s) {
