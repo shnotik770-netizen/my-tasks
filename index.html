@@ -651,6 +651,7 @@ function render(){
   const fn = { pri:viewPri, cats:viewCats, rabbi:viewRabbi, hours:viewHours, hist:viewHours }[tab] || viewPri;
   v.innerHTML = fn();
   if (tab === 'pri') initSortable();
+  if (dayModal && document.getElementById('ov').classList.contains('on')) openDay(dayModal);
 }
 
 function taskRow(t, ctx, idx){
@@ -1126,7 +1127,15 @@ function shiftMonth(which, n){
 }
 
 /* ---------- היסטוריה וסיכום חודש (באותה לשונית) ---------- */
-let openDays = {};
+let dayModal = null;
+function openDay(d){
+  dayModal = d;
+  const m = dayMinutes(d), o = dayOff(d);
+  openModal(`<h3>${heDate(d, true)}</h3>
+    <div class="row" style="margin-bottom:6px"><span class="chip">⏱️ ${m ? fmtHours(m) + ' שעות' : 'לא נרשמו שעות'}</span>${o ? `<span class="chip rec">🏖️ ${esc(o.reason || 'חופש')}</span>` : ''}</div>
+    ${dayDetail(d)}
+    <div class="mfoot"><button class="btn sec" onclick="closeModal()">סגור</button></div>`);
+}
 function monthDays(ym){
   const days = new Set();
   const add = d => d && String(d).startsWith(ym) && days.add(d);
@@ -1156,16 +1165,12 @@ function monthSection(){
     const m = dayMinutes(d), o = dayOff(d);
     const logs = S.Log.filter(l => l.date === d);
     const dn = logs.filter(l => l.result === 'done').length;
-    const op = !!openDays[d];
-    h += `<div class="day ${op ? 'open' : ''}"><div class="day-h dayrow" onclick="openDays['${d}']=!openDays['${d}'];render()">
-      <span class="caret" style="transform:rotate(${op ? 0 : 90}deg)">▼</span>
+    h += `<div class="day"><div class="day-h dayrow" onclick="openDay('${d}')">
       <span>${heDate(d)} <span class="muted">${hebDate(d)}</span></span>
       <span class="grow"></span>
       ${o ? `<span class="chip rec">🏖️ ${esc(o.reason || 'חופש')}</span>` : ''}
       ${dn ? `<span class="chip okc">✓ ${dn}</span>` : ''}
-      <span class="hrs">${m ? fmtHours(m) : '—'}</span></div>`;
-    if (op) h += dayDetail(d);
-    h += `</div>`;
+      <span class="hrs">${m ? fmtHours(m) : '—'}</span><span class="muted">‹</span></div></div>`;
   });
   h += `</div>`;
   return h;
@@ -1179,7 +1184,7 @@ function dayDetail(d){
   if (logs.length) h += `<div class="dd-s">📝 משימות</div>` + logs.map(logLine).join('');
   if (rn.length) h += `<div class="dd-s">🕊️ הרב סגל</div>` + rn.map(n => { const t = task(n.taskId); return `<div class="lg"><span>${t ? esc(t.title) : '—'} · ${noteLine(n).replace(/^<div>|<\/div>$/g,'')}</span></div>`; }).join('');
   if (!ivs.length && !logs.length && !rn.length) h += `<div class="muted">אין פירוט</div>`;
-  if (isEditor && d !== workDate) h += `<div style="margin-top:8px"><button class="btn sm sec" onclick="setWorkDate('${d}');window.scrollTo(0,0)">📅 תעד / ערוך שעות ליום הזה</button></div>`;
+  if (isEditor && d !== workDate) h += `<div style="margin-top:8px"><button class="btn sm sec" onclick="closeModal();setWorkDate('${d}');window.scrollTo(0,0)">📅 תעד / ערוך שעות ליום הזה</button></div>`;
   return h + `</div>`;
 }
 function copyMonthWhatsApp(){
@@ -1281,7 +1286,7 @@ function exportJSON(){
    מודל
    ========================================================= */
 function openModal(html){ document.getElementById('modal').innerHTML = html; document.getElementById('ov').classList.add('on'); }
-function closeModal(){ document.getElementById('ov').classList.remove('on'); }
+function closeModal(){ dayModal = null; document.getElementById('ov').classList.remove('on'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 /* =========================================================
