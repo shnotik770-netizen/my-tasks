@@ -210,7 +210,7 @@ const LS = {
   tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone'
 };
 const SHEET_KEYS = { Categories:'id', Tasks:'id', Log:'id', RabbiNotes:'id', WorkHours:'id', DaysOff:'date', Priorities:'taskId' };
-const REC_LABEL = { none:'ללא', weekly:'שבועית', monthly:'חודשית', bimonthly:'דו־חודשית', yearly:'שנתית' };
+const REC_LABEL = { none:'ללא', daily:'יומית', weekly:'שבועית', monthly:'חודשית', bimonthly:'דו־חודשית', yearly:'שנתית' };
 const PALETTE = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#4b5563','#65a30d','#9333ea'];
 
 function lsGet(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : v; }catch(e){ return d; } }
@@ -256,6 +256,7 @@ function addMonths(iso, n){
   t.setDate(Math.min(day, last)); return isoOf(t);
 }
 function nextDue(iso, rec){
+  if (rec === 'daily') return addDays(iso, 1);
   if (rec === 'weekly') return addDays(iso, 7);
   if (rec === 'monthly') return addMonths(iso, 1);
   if (rec === 'bimonthly') return addMonths(iso, 2);
@@ -421,7 +422,9 @@ function finishDone(id, note){
   const rec = t.recurrence || 'none';
   if (rec !== 'none'){
     const base = t.dueDate || workDate;
-    const nd = nextDue(base, rec);
+    let nd = nextDue(base, rec);
+    // אם בוצע באיחור גדול — מדלגים על מועדים שכבר עברו, כדי שהמופע הבא לא ייווצר באיחור
+    while (nd && nd <= workDate) nd = nextDue(nd, rec);
     ops.push(up('Tasks', { id:uid('t'), title:t.title, categoryId:t.categoryId, dueDate:nd, recurrence:rec, status:'open', continuous:truthy(t.continuous),
       parentTaskId:'', rabbiType:'', rabbiStatus:'', needsDecision:false, notes:t.notes||'', createdAt:now, updatedAt:now, doneDate:'' }));
     msg += ' · הבאה: ' + heDate(nd);
