@@ -9,7 +9,7 @@
 
 // מבנה הגיליונות: שם ← עמודות. העמודה הראשונה היא המפתח.
 var HEADERS = {
-  Categories: ['id', 'name', 'parentId', 'color', 'order', 'active'],
+  Categories: ['id', 'name', 'parentId', 'color', 'order', 'active', 'rabbiDefault'],
   Tasks: ['id', 'title', 'categoryId', 'dueDate', 'recurrence', 'status', 'continuous', 'parentTaskId',
           'rabbiType', 'rabbiStatus', 'needsDecision', 'notes', 'createdAt', 'updatedAt', 'doneDate', 'fixedSchedule'],
   Log: ['id', 'taskId', 'date', 'result', 'note', 'createdAt'],
@@ -19,6 +19,7 @@ var HEADERS = {
   DaysOff: ['date', 'reason'],
   Settings: ['key', 'value']
 };
+var VERSION = 2;
 var EDITABLE = ['Categories', 'Tasks', 'Log', 'RabbiNotes', 'WorkHours', 'DaysOff'];
 
 function doGet(e) { return handle_((e && e.parameter) || {}); }
@@ -53,7 +54,7 @@ function route_(p) {
     case 'checkCode':
       return { status: 'success', ok: isEditor_(p.code) };
     case 'load':
-      return { status: 'success', data: readAll_(), editor: p.code ? isEditor_(p.code) : false };
+      return { status: 'success', version: VERSION, data: readAll_(), editor: p.code ? isEditor_(p.code) : false };
     case 'rabbiAction':
       return withLock_(function () { return rabbiAction_(p); });
     case 'batch':

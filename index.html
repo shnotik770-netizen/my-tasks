@@ -192,6 +192,7 @@ table.sum th{color:var(--mute);font-weight:600;font-size:13px}
   <span>📅 מתעד עבור: <span id="dateBarTxt"></span> · כל הסימונים יירשמו ליום הזה</span>
   <button onclick="setWorkDate(todayISO())">חזרה להיום</button>
 </div>
+<div class="robar" id="verBar" style="background:#fef2f2;color:#b91c1c">⚠️ צריך לעדכן את קוד השרת (Code.gs) — חלק מההגדרות לא יישמרו עד העדכון. <a href="https://github.com/shnotik770-netizen/my-tasks/blob/main/README.md#עדכון-קוד-השרת-בעתיד" target="_blank" style="color:inherit">איך?</a></div>
 <div class="robar" id="roBar">מצב צפייה · אפשר לאשר, לסמן ולכתוב הערות בלשונית "הרב סגל"</div>
 
 <main class="wrap" id="view"></main>
@@ -212,6 +213,7 @@ const LS = {
   gas: 'mt_gas', code: 'mt_code', data: 'mt_data', queue: 'mt_queue', author: 'mt_author',
   tab: 'mt_tab', collapsed: 'mt_collapsed', showDone: 'mt_showdone'
 };
+const NEEDED_SERVER_VERSION = 2;
 const SHEET_KEYS = { Categories:'id', Tasks:'id', Log:'id', RabbiNotes:'id', WorkHours:'id', DaysOff:'date', Priorities:'taskId' };
 const REC_LABEL = { none:'ללא', daily:'יומית', weekly:'שבועית', monthly:'חודשית', bimonthly:'דו־חודשית', yearly:'שנתית' };
 const PALETTE = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#4b5563','#65a30d','#9333ea'];
@@ -432,6 +434,7 @@ async function load(silent){
     if (!res || res.status !== 'success') throw new Error((res && res.message) || 'שגיאה');
     if (queue.length) return; // שינוי חדש נכנס בזמן הטעינה — נטען שוב בפעם הבאה
     S = Object.assign(emptyData(), res.data);
+    document.getElementById('verBar').classList.toggle('on', isEditorCode() && (res.version || 1) < NEEDED_SERVER_VERSION);
     isEditor = !!res.editor;
     if (editCode && !res.editor){ editCode = ''; lsDel(LS.code); toast('קוד העריכה כבר לא תקף — עברת למצב צפייה', true); if (tab !== 'rabbi') tab = 'rabbi'; }
     saveCache(); setSync('ok'); render();
@@ -441,6 +444,7 @@ async function load(silent){
   }
 }
 
+function isEditorCode(){ return !!editCode; }
 function seedLocal(){
   return Object.assign(emptyData(), { Categories:[
     { id:'c1', name:'שוטף בנקים', parentId:'', color:'#2563eb', order:1, active:true },
@@ -779,7 +783,7 @@ function viewCats(){
     h += `<div class="card ${col ? 'collapsed' : ''}">
       <div class="card-h cat-h" onclick="toggleCol('${r.id}')">
         <span class="caret">▼</span><span class="cdot" style="background:${catColor(r.id)}"></span>
-        <h2>${esc(r.name)} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
+        <h2>${esc(r.name)}${r.rabbiDefault ? ' <span class="chip rab">🕊️ ' + (r.rabbiDefault === 'approve' ? 'לאישור' : 'לידיעה') + '</span>' : ''} <span class="cnt">(${total})${fut && !showDone ? ' · ' + fut + ' מתוזמנות' : ''}</span></h2>
         ${isEditor ? `<button class="ib" title="משימה חדשה בקטגוריה" onclick="event.stopPropagation();openTask(null,{categoryId:'${r.id}'})">＋</button>
         <button class="ib" title="עריכת קטגוריה" onclick="event.stopPropagation();openCat('${r.id}')">✎</button>` : ''}
       </div><div class="cbody">
@@ -814,6 +818,11 @@ function openCat(id){
       <option value="">— קטגוריה ראשית —</option>
       ${parents.map(p => `<option value="${p.id}" ${c && String(c.parentId) === String(p.id) ? 'selected' : ''}>תת־קטגוריה של: ${esc(p.name)}</option>`).join('')}
     </select>${hasKids ? '<div class="muted">יש לה תת־קטגוריות, לכן היא נשארת ראשית.</div>' : ''}</div>
+    <div class="fld"><label>🕊️ הרב סגל</label><select id="cRabbi">
+      <option value="">רגילה — לא נשלח אוטומטית</option>
+      <option value="approve" ${c && c.rabbiDefault === 'approve' ? 'selected' : ''}>כל משימה חדשה נשלחת לאישור הרב</option>
+      <option value="info" ${c && c.rabbiDefault === 'info' ? 'selected' : ''}>כל משימה חדשה נשלחת לידיעת הרב</option>
+    </select><div class="muted">בכל משימה אפשר עדיין לבחור לאישור או לידיעה. תת־קטגוריות יורשות את ההגדרה.</div></div>
     <div class="two"><div class="fld"><label>צבע</label><input type="color" id="cColor" value="${color}" style="width:100%;height:40px;border:1px solid #cbd5e1;border-radius:10px"></div>
     <div class="fld"><label>מיקום (מספר)</label><input type="text" inputmode="numeric" id="cOrder" value="${c ? c.order : (S.Categories.length + 1)}"></div></div>
     <div class="mfoot">
@@ -825,7 +834,7 @@ function openCat(id){
 }
 function saveCat(id){
   const name = val('cName').trim(); if (!name){ toast('חסר שם', true); return; }
-  const rec = { id: id || uid('c'), name, parentId: document.getElementById('cParent').value, color: val('cColor'), order: Number(val('cOrder')) || 0, active: true };
+  const rec = { id: id || uid('c'), name, parentId: document.getElementById('cParent').value, color: val('cColor'), order: Number(val('cOrder')) || 0, active: true, rabbiDefault: val('cRabbi') };
   closeModal(); commit([ up('Categories', rec) ], 'הקטגוריה נשמרה');
 }
 function deleteCat(id){
@@ -836,6 +845,13 @@ function deleteCat(id){
   closeModal(); commit([ del('Categories', id) ], 'נמחקה');
 }
 
+// ברירת מחדל של הרב סגל לקטגוריה (תת־קטגוריה יורשת מהאב)
+function catRabbi(id){ const c = cat(id); if (!c) return ''; if (c.rabbiDefault) return c.rabbiDefault; const p = c.parentId && cat(c.parentId); return (p && p.rabbiDefault) || ''; }
+function applyCatRabbi(){
+  const d = catRabbi(val('mCat')); if (!d) return;
+  mRabbi = d;
+  const btn = document.querySelector('#mRabSeg button[data-r="' + d + '"]'); if (btn) segOn('mRabSeg', btn);
+}
 function catOptions(sel){
   let h = '';
   roots().forEach(r => {
@@ -856,23 +872,23 @@ function openTask(id, preset){
   const fus = t ? followups(t.id) : [];
   const notes = t ? notesOf(t.id) : [];
   const logs = t ? S.Log.filter(l => String(l.taskId) === String(t.id)).sort((a,b) => String(b.date).localeCompare(String(a.date))) : [];
-  mRec = (t && t.recurrence) || 'none'; mRabbi = (t && t.rabbiType) || '';
+  mRec = (t && t.recurrence) || 'none'; mRabbi = t ? (t.rabbiType || '') : catRabbi(preset.categoryId || (roots()[0] && roots()[0].id));
   const ro = !isEditor;
   const dis = ro ? 'disabled' : '';
   let h = `<h3>${t ? (ro ? 'משימה' : 'עריכת משימה') : 'משימה חדשה'}</h3>`;
   if (parent) h += `<div class="chip fu" style="margin-bottom:10px;display:inline-block">↳ המשך של: <span class="link" onclick="openTask('${parent.id}')">${esc(parent.title)}</span></div>`;
   h += `<div class="fld"><label>מה צריך לעשות</label><input type="text" id="mTitle" ${dis} value="${esc(t ? t.title : (preset.title || (parent ? 'המשך: ' + parent.title : '')))}"></div>
     <div class="two">
-      <div class="fld"><label>קטגוריה</label><select id="mCat" ${dis}>${catOptions(t ? t.categoryId : (preset.categoryId || ''))}</select></div>
+      <div class="fld"><label>קטגוריה</label><select id="mCat" ${dis} onchange="applyCatRabbi()">${catOptions(t ? t.categoryId : (preset.categoryId || ''))}</select></div>
       <div class="fld"><label>תאריך יעד (לא חובה)</label><input type="date" id="mDue" ${dis} value="${esc(t ? t.dueDate : (preset.dueDate || ''))}" oninput="document.getElementById('mDueHeb').textContent=hebDate(this.value,true)"><div class="muted" id="mDueHeb">${hebDate(t ? t.dueDate : (preset.dueDate || ''), true)}</div></div>
     </div>
     <div class="fld"><label>חזרה</label><div class="seg" id="mRecSeg">${Object.keys(REC_LABEL).map(k => `<button type="button" ${dis} class="${mRec === k ? 'on' : ''}" onclick="mRec='${k}';segOn('mRecSeg',this);document.getElementById('mFixedRow').style.display=mRec==='none'?'none':''">${REC_LABEL[k]}</button>`).join('')}</div>
       <label id="mFixedRow" class="row muted" style="gap:6px;margin-top:7px;cursor:pointer;${mRec === 'none' ? 'display:none' : ''}"><input type="checkbox" id="mFixed" ${dis} ${t && truthy(t.fixedSchedule) ? 'checked' : ''}> 📌 תאריך קבוע: המועד הבא לפי תאריך היעד (למשל כל 10 בחודש), ולא לפי יום הביצוע</label></div>
     <div class="fld"><label class="row" style="gap:6px;cursor:pointer;color:var(--ink);font-size:15px;font-weight:500"><input type="checkbox" id="mCont" ${dis} ${t && truthy(t.continuous) ? 'checked' : ''}> 🔁 משימה מתמשכת <span class="muted">(נמשכת כמה ימים, נשארת ברשימה עד שמסיימים)</span></label></div>
     <div class="fld"><label>הרב סגל</label><div class="seg" id="mRabSeg">
-      <button type="button" ${dis} class="${mRabbi === '' ? 'on' : ''}" onclick="mRabbi='';segOn('mRabSeg',this)">לא צריך</button>
-      <button type="button" ${dis} class="${mRabbi === 'approve' ? 'on' : ''}" onclick="mRabbi='approve';segOn('mRabSeg',this)">🕊️ לאישור הרב</button>
-      <button type="button" ${dis} class="${mRabbi === 'info' ? 'on' : ''}" onclick="mRabbi='info';segOn('mRabSeg',this)">👁 לידיעת הרב</button>
+      <button type="button" data-r="" ${dis} class="${mRabbi === '' ? 'on' : ''}" onclick="mRabbi='';segOn('mRabSeg',this)">לא צריך</button>
+      <button type="button" data-r="approve" ${dis} class="${mRabbi === 'approve' ? 'on' : ''}" onclick="mRabbi='approve';segOn('mRabSeg',this)">🕊️ לאישור הרב</button>
+      <button type="button" data-r="info" ${dis} class="${mRabbi === 'info' ? 'on' : ''}" onclick="mRabbi='info';segOn('mRabSeg',this)">👁 לידיעת הרב</button>
     </div>
     ${t && t.rabbiType && t.rabbiStatus && t.rabbiStatus !== 'pending' && !ro ? `<label class="row muted" style="gap:5px;margin-top:6px"><input type="checkbox" id="mResend"> לשלוח שוב לרב (חוזר לתיבה)</label>` : ''}
     </div>
