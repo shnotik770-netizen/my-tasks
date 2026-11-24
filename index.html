@@ -173,7 +173,7 @@ table.sum th{color:var(--mute);font-weight:600;font-size:13px}
   <div class="wrap">
     <div class="hbar">
       <span class="dot" id="syncDot" title=""></span>
-      <h1>המשימות שלי</h1>
+      <div style="flex:1;min-width:0"><h1>המשימות שלי</h1><div id="hdrHeb" style="font-size:12px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div></div>
       <button class="hbtn" onclick="openDateModal()" title="תיעוד לתאריך אחר">📅 <span id="hdrDate"></span></button>
       <button class="hbtn" id="lockBtn" onclick="toggleLogin()"></button>
       <button class="hbtn" onclick="openSettings()" title="הגדרות">⚙️</button>
@@ -246,7 +246,35 @@ function nowHM(){ const d = new Date(); return pad(d.getHours()) + ':' + pad(d.g
 function heDate(iso, long){
   if (!iso) return '';
   const d = parseISO(iso);
-  return d.toLocaleDateString('he-IL', long ? { weekday:'long', day:'numeric', month:'long', year:'numeric' } : { weekday:'short', day:'numeric', month:'numeric' });
+  const g = d.toLocaleDateString('he-IL', long ? { weekday:'long', day:'numeric', month:'long', year:'numeric' } : { weekday:'short', day:'numeric', month:'numeric' });
+  return long ? g + ' · ' + hebDate(iso, true) : g;
+}
+/* ---------- תאריך עברי ---------- */
+function gematria(n){
+  if (n === 15) return 'ט״ו'; if (n === 16) return 'ט״ז';
+  const H = [[400,'ת'],[300,'ש'],[200,'ר'],[100,'ק'],[90,'צ'],[80,'פ'],[70,'ע'],[60,'ס'],[50,'נ'],[40,'מ'],[30,'ל'],[20,'כ'],[10,'י'],[9,'ט'],[8,'ח'],[7,'ז'],[6,'ו'],[5,'ה'],[4,'ד'],[3,'ג'],[2,'ב'],[1,'א']];
+  let out = '';
+  while (n > 0){
+    if (n % 100 === 15 && n < 100){ out += 'טו'; break; } if (n % 100 === 16 && n < 100){ out += 'טז'; break; }
+    if (n === 15){ out += 'טו'; break; } if (n === 16){ out += 'טז'; break; }
+    for (const [v, ch] of H){ if (n >= v){ out += ch; n -= v; break; } }
+  }
+  return out.length === 1 ? out + '׳' : out.slice(0, -1) + '״' + out.slice(-1);
+}
+const hebFmt = (() => { try { return new Intl.DateTimeFormat('he-IL-u-ca-hebrew', { day:'numeric', month:'long', year:'numeric' }); } catch(e){ return null; } })();
+function hebParts(iso){
+  if (!hebFmt || !iso) return null;
+  const d = parseISO(iso); d.setHours(12);
+  const p = {}; hebFmt.formatToParts(d).forEach(x => p[x.type] = x.value);
+  if (!p.day || !p.month) return null;
+  return { day: gematria(+p.day), month: p.month, year: gematria((+p.year) % 1000) };
+}
+// withYear: "י״ד כסלו תשפ״ז" · בלי: "י״ד כסלו"
+function hebDate(iso, withYear){ const h = hebParts(iso); return h ? h.day + ' ' + h.month + (withYear ? ' ' + h.year : '') : ''; }
+function hebMonthsOf(ym){
+  const [y, m] = ym.split('-').map(Number); const last = new Date(y, m, 0).getDate();
+  const a = hebParts(ym + '-01'), b = hebParts(ym + '-' + pad(last)); if (!a || !b) return '';
+  return a.month === b.month ? a.month + ' ' + b.year : a.month + (a.year !== b.year ? ' ' + a.year : '') + '–' + b.month + ' ' + b.year;
 }
 function shortDate(iso){ if(!iso) return ''; const d = parseISO(iso); return d.getDate() + '.' + (d.getMonth()+1); }
 function daysBetween(a, b){ return Math.round((parseISO(b) - parseISO(a)) / 86400000); }
@@ -566,6 +594,7 @@ function render(){
   document.getElementById('dateBar').classList.toggle('on', other);
   document.getElementById('dateBarTxt').textContent = heDate(workDate, true);
   document.getElementById('hdrDate').textContent = other ? shortDate(workDate) : 'היום';
+  document.getElementById('hdrHeb').textContent = new Date().toLocaleDateString('he-IL',{weekday:'long'}) + ', ' + hebDate(todayISO(), true) + ' · ' + new Date().toLocaleDateString('he-IL');
   document.getElementById('roBar').classList.toggle('on', !isEditor);
   const lb = document.getElementById('lockBtn');
   lb.classList.toggle('hide', isLocal());
@@ -584,7 +613,7 @@ function taskRow(t, ctx, idx){
   else if (ctx !== 'cat') meta.push(`<span class="chip cat" style="background:${catColor(t.categoryId)}">${esc(catPath(t.categoryId))}</span>`);
   if (t.dueDate && !done){
     const dd = daysBetween(todayISO(), t.dueDate);
-    meta.push(`<span class="chip ${dd < 0 ? 'late' : dd === 0 ? 'today' : ''}">📅 ${dd < 0 ? 'באיחור · ' : dd === 0 ? 'היום · ' : ''}${heDate(t.dueDate)}</span>`);
+    meta.push(`<span class="chip ${dd < 0 ? 'late' : dd === 0 ? 'today' : ''}">📅 ${dd < 0 ? 'באיחור · ' : dd === 0 ? 'היום · ' : ''}${heDate(t.dueDate)} · ${hebDate(t.dueDate)}</span>`);
   }
   if (done && t.doneDate) meta.push(`<span class="chip okc">✓ ${heDate(t.doneDate)}</span>`);
   if (t.recurrence && t.recurrence !== 'none') meta.push(`<span class="chip rec">↻ ${REC_LABEL[t.recurrence] || t.recurrence}${truthy(t.fixedSchedule) ? ' · 📌' : ''}</span>`);
@@ -641,6 +670,7 @@ function viewPri(){
   }
   const list = priList();
   h += `<div class="card"><div class="card-h"><h2>⭐ רשימת עדיפויות</h2>
+    ${isEditor && priBlocks(list).length > 1 ? `<button class="btn sm sec ${showGroupArrows ? 'on' : ''}" title="הצג/הסתר חיצים להזזת קטגוריות שלמות" onclick="showGroupArrows=!showGroupArrows;render()" style="${showGroupArrows ? 'background:var(--pri-soft);color:var(--pri)' : ''}">⏶⏷</button>` : ''}
     ${isEditor && list.length > 1 ? `<button class="btn sm sec" title="סדר מחדש לפי סדר הקטגוריות" onclick="if(confirm('לסדר את כל הרשימה לפי סדר הקטגוריות? (הסדר הפנימי בכל קטגוריה נשמר)'))sortPriByCat()">⇅ לפי קטגוריה</button>` : ''}
     ${isEditor ? `<button class="btn sm" onclick="openPicker()">＋ הוסף</button>` : ''}</div>`;
   if (!list.length) h += `<div class="empty">הרשימה ריקה.${isEditor ? '<br>הוסף משימות מהקטגוריות לפי סדר העבודה.' : ''}</div>`;
@@ -649,7 +679,7 @@ function viewPri(){
     h += `<div id="priList">` + bl.map((b, bi) => {
       const c = cat(b.root);
       return `<div class="pgh"><span class="cdot" style="background:${catColor(b.root)}"></span><span class="grow">${esc(c ? c.name : 'ללא קטגוריה')} <span class="cnt">(${b.end - b.start + 1})</span></span>
-        ${isEditor ? `<button class="ib" title="הזז את כל הקטגוריה למעלה" ${bi === 0 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},-1)">⏶</button><button class="ib" title="הזז את כל הקטגוריה למטה" ${bi === bl.length-1 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},1)">⏷</button>` : ''}</div>`
+        ${isEditor && showGroupArrows ? `<button class="ib" title="הזז את כל הקטגוריה למעלה" ${bi === 0 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},-1)">⏶</button><button class="ib" title="הזז את כל הקטגוריה למטה" ${bi === bl.length-1 ? 'disabled style="opacity:.25"' : ''} onclick="moveBlock(${bi},1)">⏷</button>` : ''}</div>`
         + list.slice(b.start, b.end + 1).map((p, k) => taskRow(task(p.taskId), 'pri', b.start + k)).join('');
     }).join('') + `</div>`;
   }
@@ -688,6 +718,7 @@ function delLog(id){
 }
 
 let sortableInst = null;
+let showGroupArrows = false;
 function initSortable(){
   const el = document.getElementById('priList');
   if (!el || !isEditor || !window.Sortable) return;
@@ -832,7 +863,7 @@ function openTask(id, preset){
   h += `<div class="fld"><label>מה צריך לעשות</label><input type="text" id="mTitle" ${dis} value="${esc(t ? t.title : (preset.title || (parent ? 'המשך: ' + parent.title : '')))}"></div>
     <div class="two">
       <div class="fld"><label>קטגוריה</label><select id="mCat" ${dis}>${catOptions(t ? t.categoryId : (preset.categoryId || ''))}</select></div>
-      <div class="fld"><label>תאריך יעד (לא חובה)</label><input type="date" id="mDue" ${dis} value="${esc(t ? t.dueDate : (preset.dueDate || ''))}"></div>
+      <div class="fld"><label>תאריך יעד (לא חובה)</label><input type="date" id="mDue" ${dis} value="${esc(t ? t.dueDate : (preset.dueDate || ''))}" oninput="document.getElementById('mDueHeb').textContent=hebDate(this.value,true)"><div class="muted" id="mDueHeb">${hebDate(t ? t.dueDate : (preset.dueDate || ''), true)}</div></div>
     </div>
     <div class="fld"><label>חזרה</label><div class="seg" id="mRecSeg">${Object.keys(REC_LABEL).map(k => `<button type="button" ${dis} class="${mRec === k ? 'on' : ''}" onclick="mRec='${k}';segOn('mRecSeg',this);document.getElementById('mFixedRow').style.display=mRec==='none'?'none':''">${REC_LABEL[k]}</button>`).join('')}</div>
       <label id="mFixedRow" class="row muted" style="gap:6px;margin-top:7px;cursor:pointer;${mRec === 'none' ? 'display:none' : ''}"><input type="checkbox" id="mFixed" ${dis} ${t && truthy(t.fixedSchedule) ? 'checked' : ''}> 📌 תאריך קבוע: המועד הבא לפי תאריך היעד (למשל כל 10 בחודש), ולא לפי יום הביצוע</label></div>
@@ -967,10 +998,10 @@ function viewHours(){
     const m = dayMinutes(di), o = dayOff(di);
     if (!m && !o) continue;
     tot += m; if (m) workDays++; if (o) offDays++;
-    rows += `<tr><td><span class="link" onclick="setWorkDate('${di}')">${heDate(di)}</span></td><td>${m ? fmtHours(m) : ''}</td><td class="off">${o ? '🏖️ ' + esc(o.reason || 'חופש') : ''}</td></tr>`;
+    rows += `<tr><td><span class="link" onclick="setWorkDate('${di}')">${heDate(di)}</span> <span class="muted">${hebDate(di)}</span></td><td>${m ? fmtHours(m) : ''}</td><td class="off">${o ? '🏖️ ' + esc(o.reason || 'חופש') : ''}</td></tr>`;
   }
   const monthName = new Date(yy, mm-1, 1).toLocaleDateString('he-IL', { month:'long', year:'numeric' });
-  h += `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hours',-1)">→</button><h2 style="text-align:center">${monthName}</h2><button class="ib" onclick="shiftMonth('hours',1)">←</button></div>
+  h += `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hours',-1)">→</button><h2 style="text-align:center">${monthName}<div class="muted" style="font-weight:500">${hebMonthsOf(hoursMonth)}</div></h2><button class="ib" onclick="shiftMonth('hours',1)">←</button></div>
     <div class="card-b"><div class="row" style="gap:18px;margin-bottom:8px"><div><div class="muted">סה"כ שעות</div><div class="big">${fmtHours(tot)}</div></div>
     <div><div class="muted">ימי עבודה</div><div class="big">${workDays}</div></div><div><div class="muted">ימי חופש</div><div class="big off">${offDays}</div></div></div>
     ${rows ? `<table class="sum"><tr><th>יום</th><th>שעות</th><th></th></tr>${rows}</table>` : '<div class="empty">אין נתונים בחודש הזה</div>'}</div></div>`;
@@ -1003,7 +1034,7 @@ function viewHist(){
   S.DaysOff.forEach(o => o.date && o.date.startsWith(histMonth) && days.add(o.date));
   S.RabbiNotes.forEach(n => n.date && n.date.startsWith(histMonth) && n.action !== 'sent' && days.add(n.date));
   const sorted = [...days].sort().reverse();
-  let h = `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hist',-1)">→</button><h2 style="text-align:center">${monthName}</h2><button class="ib" onclick="shiftMonth('hist',1)">←</button></div>`;
+  let h = `<div class="card"><div class="card-h"><button class="ib" onclick="shiftMonth('hist',-1)">→</button><h2 style="text-align:center">${monthName}<div class="muted" style="font-weight:500">${hebMonthsOf(histMonth)}</div></h2><button class="ib" onclick="shiftMonth('hist',1)">←</button></div>`;
   if (!sorted.length) h += `<div class="empty">אין פעילות בחודש הזה</div>`;
   sorted.forEach(d => {
     const logs = S.Log.filter(l => l.date === d);
@@ -1031,7 +1062,7 @@ function setWorkDate(d){
 function openDateModal(){
   openModal(`<h3>📅 תיעוד לתאריך אחר</h3>
     <p class="muted">כל סימון "בוצע", תיעוד ושעות עבודה יירשמו לתאריך שתבחר, עד שתחזור להיום. בראש המסך יופיע פס כתום כתזכורת.</p>
-    <div class="fld"><label>תאריך</label><input type="date" id="wdInput" value="${workDate}" max="${todayISO()}"></div>
+    <div class="fld"><label>תאריך</label><input type="date" id="wdInput" value="${workDate}" max="${todayISO()}" oninput="document.getElementById('wdHeb').textContent=hebDate(this.value,true)"><div class="muted" id="wdHeb">${hebDate(workDate, true)}</div></div>
     <div class="row" style="margin-bottom:6px">
       <button class="btn sm sec" onclick="setWorkDate(addDays(todayISO(),-1))">אתמול</button>
       <button class="btn sm sec" onclick="setWorkDate(addDays(todayISO(),-2))">שלשום</button>
