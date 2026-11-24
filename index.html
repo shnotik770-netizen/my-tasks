@@ -89,6 +89,8 @@ main{padding-top:14px}
 .ib{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:16px}
 .ib:hover{background:#f1f5f9;color:var(--ink)}
 .ib.on{color:#f59e0b}
+.task[data-id]{}
+#priList .task{cursor:grab}
 .handle{cursor:grab;color:#cbd5e1;font-size:18px;padding:2px 0;flex:none;user-select:none;touch-action:none}
 .pnum{font-weight:800;color:var(--pri);min-width:20px;text-align:center;flex:none;margin-top:2px}
 .pnote{width:100%;border:0;border-bottom:1px dashed var(--line);font-size:13px;padding:3px 0;margin-top:4px;background:transparent;color:#334155}
@@ -218,10 +220,11 @@ function lsJSON(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.p
 
 let gasUrl = lsGet(LS.gas, DEFAULT_GAS_URL) || '';
 let editCode = lsGet(LS.code, '');
-let isEditor = false;
+let isEditor = !!(lsGet(LS.gas, DEFAULT_GAS_URL) ? lsGet(LS.code, '') : true);
 let S = emptyData();
 let queue = lsJSON(LS.queue, []);
-let tab = lsGet(LS.tab, 'pri');
+// מסך פתיחה: עורך ← עדיפויות, צופה ← הרב סגל
+let tab = isEditor ? 'pri' : 'rabbi';
 let workDate = todayISO();
 let collapsed = lsJSON(LS.collapsed, {});
 let showDone = lsGet(LS.showDone, '0') === '1';
@@ -364,7 +367,7 @@ async function load(silent){
     if (queue.length) return; // שינוי חדש נכנס בזמן הטעינה — נטען שוב בפעם הבאה
     S = Object.assign(emptyData(), res.data);
     isEditor = !!res.editor;
-    if (editCode && !res.editor){ editCode = ''; lsDel(LS.code); toast('קוד העריכה כבר לא תקף — עברת למצב צפייה', true); }
+    if (editCode && !res.editor){ editCode = ''; lsDel(LS.code); toast('קוד העריכה כבר לא תקף — עברת למצב צפייה', true); if (tab !== 'rabbi') tab = 'rabbi'; }
     saveCache(); setSync('ok'); render();
   } catch(e){
     setSync('err', String(e.message || e));
@@ -514,7 +517,7 @@ function copyText(s){
 /* =========================================================
    תצוגה
    ========================================================= */
-function go(t){ tab = t; lsSet(LS.tab, t); render(); window.scrollTo(0,0); }
+function go(t){ tab = t; render(); window.scrollTo(0,0); }
 
 function render(){
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -571,7 +574,7 @@ function taskRow(t, ctx, idx){
       ${lastRabbi ? `<div class="t-note" style="color:var(--rabbi)">🕊️ ${esc(lastRabbi.author)}: ${esc(lastRabbi.text)}</div>` : ''}
     </div>
     ${isEditor && !done ? `<div class="t-act">
-      ${ctx === 'pri' && !window.Sortable ? `<button class="ib" title="למעלה" onclick="movePri(${idx}, ${idx-1})">▲</button><button class="ib" title="למטה" onclick="movePri(${idx}, ${idx+1})">▼</button>` : ''}
+      ${ctx === 'pri' ? `<button class="ib" title="למעלה" onclick="movePri(${idx}, ${idx-1})" ${idx === 0 ? 'disabled style="opacity:.25"' : ''}>▲</button><button class="ib" title="למטה" onclick="movePri(${idx}, ${idx+1})">▼</button>` : ''}
       <button class="ib" title="תיעוד (בוצע / התקדמות / לא בוצע)" onclick="openLogModal('${esc(t.id)}')">📝</button>
       <button class="ib ${pri ? 'on' : ''}" title="${pri ? 'הסר מהעדיפויות' : 'הוסף לעדיפויות'}" onclick="togglePri('${esc(t.id)}')">${pri ? '★' : '☆'}</button>
     </div>` : ''}
@@ -638,7 +641,7 @@ let sortableInst = null;
 function initSortable(){
   const el = document.getElementById('priList');
   if (!el || !isEditor || !window.Sortable) return;
-  sortableInst = Sortable.create(el, { handle:'.handle', animation:150, ghostClass:'sortable-ghost', onEnd: (e) => { if (e.oldIndex !== e.newIndex) movePri(e.oldIndex, e.newIndex); } });
+  sortableInst = Sortable.create(el, { animation:150, forceFallback:true, fallbackTolerance:4, delay:180, delayOnTouchOnly:true, filter:'button,input,textarea,a', preventOnFilter:false, draggable:'.task', ghostClass:'sortable-ghost', onEnd: (e) => { if (e.oldIndex !== e.newIndex) movePri(e.oldIndex, e.newIndex); } });
 }
 
 function openPicker(){
@@ -991,7 +994,7 @@ function openDateModal(){
 async function toggleLogin(){
   if (isEditor){
     if (!confirm('לצאת ממצב עריכה (למצב צפייה)?')) return;
-    editCode = ''; lsDel(LS.code); isEditor = false; render(); toast('עברת למצב צפייה'); return;
+    editCode = ''; lsDel(LS.code); isEditor = false; go('rabbi'); toast('עברת למצב צפייה'); return;
   }
   const c = prompt('קוד עריכה:'); if (!c) return;
   try{
@@ -1000,7 +1003,7 @@ async function toggleLogin(){
     setSync('ok');
     if (r.status !== 'success') throw new Error(r.message);
     if (!r.ok){ toast('קוד שגוי', true); return; }
-    editCode = c; lsSet(LS.code, c); isEditor = true; render(); toast('🔓 נכנסת למצב עריכה');
+    editCode = c; lsSet(LS.code, c); isEditor = true; go('pri'); toast('🔓 נכנסת למצב עריכה — הקוד נשמר במכשיר הזה');
   } catch(e){ setSync('err'); toast('בדיקת הקוד נכשלה: ' + (e.message || e), true); }
 }
 
