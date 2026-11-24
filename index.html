@@ -204,7 +204,7 @@ table.sum th{color:var(--mute);font-weight:600;font-size:13px}
 
 <main class="wrap" id="view"></main>
 
-<button class="fab hide" id="fab" onclick="openTask(null)">＋ משימה</button>
+<button class="fab hide" id="fab" onclick="openTask(null, tab === 'pri' ? { toPri:true } : {})">＋ משימה</button>
 <div class="ov" id="ov" onclick="if(event.target===this)closeModal()"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -916,7 +916,7 @@ function openTask(id, preset){
   mRec = (t && t.recurrence) || 'none'; mRabbi = t ? (t.rabbiType || '') : catRabbi(preset.categoryId !== undefined ? preset.categoryId : (roots()[0] && roots()[0].id));
   const ro = !isEditor;
   const dis = ro ? 'disabled' : '';
-  let h = `<h3>${t ? (ro ? 'משימה' : 'עריכת משימה') : 'משימה חדשה'}</h3>`;
+  let h = `<h3>${t ? (ro ? 'משימה' : 'עריכת משימה') : 'משימה חדשה'}${!t && preset.toPri ? ' <span class="chip" style="background:#fef3c7;color:#92400e;vertical-align:middle">★ תיכנס לעדיפויות</span>' : ''}</h3>`;
   if (parent) h += `<div class="chip fu" style="margin-bottom:10px;display:inline-block">↳ המשך של: <span class="link" onclick="openTask('${parent.id}')">${esc(parent.title)}</span></div>`;
   h += `<div class="fld"><label>מה צריך לעשות</label><input type="text" id="mTitle" ${dis} value="${esc(t ? t.title : (preset.title || (parent ? 'המשך: ' + parent.title : '')))}"></div>
     <div class="two">
